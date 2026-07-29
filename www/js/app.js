@@ -269,7 +269,8 @@
 
         if (config.auto_open_browser !== false) {
           addLog("[AUTO OPEN] Znaleziono wolny termin! Otwieram stronę rezerwacji w Google Chrome...");
-          openChromeBrowser('https://info-kierowca.pl/reservation');
+          await openChromeBrowser('https://info-kierowca.pl/reservation');
+          runCdpAutoReschedule(fastest);
         }
       } else {
         currentHits = [];
@@ -286,6 +287,123 @@
         setUIState("error", "Błąd sesji / połączenia", err.message);
         addLog(`[ERROR] ${err.message}`);
       }
+    }
+  }
+
+  async function runCdpAutoReschedule(fastestHit) {
+    if (!config.auto_select_slot && !config.auto_confirm_reschedule) return;
+
+    addLog("[CDP AUTOMATION] Rozpoczynam automatyczne klikanie po CDP w Chrome (Zmień termin -> Wybór godziny)...");
+    await sleep(2500);
+
+    try {
+      const listRes = await fetch("http://127.0.0.1:9222/json/list");
+      const tabs = await listRes.json();
+      const targetTab = tabs.find(t => t.url && t.url.includes("info-kierowca.pl")) || tabs[0];
+
+      if (!targetTab || !targetTab.webSocketDebuggerUrl) {
+        addLog("[CDP WARNING] Nie mozna polaczyc z otwartym portem CDP 9222 w Chrome.");
+        return;
+      }
+
+      const wsUrl = targetTab.webSocketDebuggerUrl;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = async () => {
+        addLog("[CDP CONNECTED] Polaczono z portem zdalnego sterowania Chrome CDP 9222!");
+        let msgId = 1;
+
+        const evalJs = (jsCode) => new Promise((resolve) => {
+          const id = msgId++;
+          const handler = (evt) => {
+            try {
+              const data = JSON.parse(evt.data);
+              if (data.id === id) {
+                ws.removeEventListener('message', handler);
+                resolve(data.result ? data.result.value : null);
+              }
+            } catch (e) { resolve(null); }
+          };
+          ws.addEventListener('message', handler);
+          ws.send(JSON.stringify({
+            id: id,
+            method: "Runtime.evaluate",
+            params: { expression: jsCode, returnByValue: true }
+          }));
+        });
+
+        const clickTextJs = (text) => `
+          (function(txt) {
+            var all = document.querySelectorAll('button, a, [role="button"]');
+            var best = null;
+            for (var i = 0; i < all.length; i++) {
+              var el = all[i];
+              var t = (el.innerText || el.textContent || '').trim();
+              if (t && t.length < 60 && t.toLowerCase().indexOf(txt.toLowerCase()) !== -1) {
+                if (!best || t.length < best[1].length) best = [el, t];
+              }
+            }
+            if (best) { best[0].click(); return true; }
+            return false;
+          })(${JSON.stringify(text)})
+        `;
+
+        const selectSlotJs = (examLabel, timeStr) => `
+          (function(examLabel, timeStr) {
+            var radios = document.querySelectorAll('input[type="radio"]');
+            for (var i = 0; i < radios.length; i++) {
+              var radio = radios[i];
+              var cur = radio;
+              var t = '';
+              for (var depth = 0; depth < 6 && cur; depth++) {
+                t = (cur.innerText || cur.textContent || '').trim();
+                if (t.indexOf(examLabel) !== -1 && t.indexOf(timeStr) !== -1) break;
+                cur = cur.parentElement;
+              }
+              if (t.indexOf(examLabel) !== -1 && t.indexOf(timeStr) !== -1) {
+                radio.click();
+                return true;
+              }
+            }
+            return false;
+          })(${JSON.stringify(examLabel)}, ${JSON.stringify(timeStr)})
+        `;
+
+        // Step 1: Click "Zmień termin"
+        addLog("[CDP STEP 1] Klikam 'Zmień termin'...");
+        await evalJs(clickTextJs("Zmień termin"));
+        await sleep(1500);
+
+        // Step 2: Click "Zmień termin rezerwacji"
+        addLog("[CDP STEP 2] Klikam 'Zmień termin rezerwacji'...");
+        await evalJs(clickTextJs("Zmień termin rezerwacji"));
+        await sleep(2000);
+
+        // Step 3: Select matching slot if auto_select_slot is enabled
+        if (config.auto_select_slot && fastestHit) {
+          const d = new Date(fastestHit.datetime);
+          const timeStr = (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+          const examLabel = fastestHit.exam_type === 'Praktyka' ? 'Egzamin praktyczny' : 'Egzamin teoretyczny';
+          
+          addLog(`[CDP STEP 3] Wybieram slot ${examLabel} ${timeStr}...`);
+          await evalJs(selectSlotJs(examLabel, timeStr));
+          await sleep(1000);
+
+          // Step 4: Click "Przejdź do podsumowania"
+          addLog("[CDP STEP 4] Klikam 'Przejdź do podsumowania'...");
+          await evalJs(clickTextJs("Przejdź do podsumowania"));
+          await sleep(1500);
+
+          // Step 5: If auto_confirm_reschedule is enabled, click "Potwierdź i przejdź dalej"
+          if (config.auto_confirm_reschedule) {
+            addLog("[CDP STEP 5] Automatyczne zatwierdzenie: Klikam 'Potwierdź i przejdź dalej'!");
+            await evalJs(clickTextJs("Potwierdź i przejdź dalej"));
+          }
+        }
+      };
+
+    } catch (err) {
+      addLog(`[CDP ERROR] Blad automatycznych klikniet po CDP: ${err.message}`);
     }
   }
 
