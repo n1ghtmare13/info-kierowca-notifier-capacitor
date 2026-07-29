@@ -42,6 +42,21 @@
     requestWakeLock();
     startPollingLoop();
     startCountdownLoop();
+
+    // Re-check immediately when returning to the app or when network restores
+    window.addEventListener('online', () => {
+      addLog("[NETWORK RESTORED] Polaczenie internetowe zostalo przywrocone. Odswiezam...");
+      runCheck();
+    });
+
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+      window.Capacitor.Plugins.App.addListener('appStateChange', (state) => {
+        if (state.isActive) {
+          addLog("[APP RESUME] Powrot do aplikacji. Weryfikuje status...");
+          runCheck();
+        }
+      });
+    }
   });
 
   function loadConfig() {
@@ -239,9 +254,27 @@
       }
 
     } catch (err) {
-      setUIState("error", "Błąd sesji / połączenia", err.message);
-      addLog(`[ERROR] ${err.message}`);
+      if (isNetworkError(err)) {
+        setUIState("scanning", "Brak połączenia z siecią", "Tymczasowy brak dostępu do internetu. Ponawiam...");
+        addLog(`[NETWORK WARNING] Tymczasowy brak sieci (DNS/Doze mode): ${err.message}. Następny cykl ponowi próbę.`);
+      } else {
+        setUIState("error", "Błąd sesji / połączenia", err.message);
+        addLog(`[ERROR] ${err.message}`);
+      }
     }
+  }
+
+  function isNetworkError(err) {
+    if (!err) return false;
+    const msg = (err.message || String(err)).toLowerCase();
+    return msg.includes('unable to resolve host') ||
+           msg.includes('no address associated with hostname') ||
+           msg.includes('failed to fetch') ||
+           msg.includes('networkerror') ||
+           msg.includes('unknownhostexception') ||
+           msg.includes('connectexception') ||
+           msg.includes('sockettimeout') ||
+           msg.includes('offline');
   }
 
   function logRawSlotsDiagnostic(rawResults) {
