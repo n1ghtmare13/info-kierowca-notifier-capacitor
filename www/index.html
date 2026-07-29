@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Info-Kierowca Notifier Mobile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="theme-dark">
+
+  <!-- App Header / Status Bar -->
+  <header class="app-header">
+    <div class="brand">
+      <span class="status-pulse" id="status-pulse"></span>
+      <h1 class="brand-title">info-kierowca</h1>
+    </div>
+    <div class="header-actions">
+      <button id="toggle-pause-btn" class="icon-btn" title="Pauza / Wznów" aria-label="Pause/Resume">
+        <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="4" height="16" rx="1.5"/><rect x="15" y="4" width="4" height="16" rx="1.5"/></svg>
+        <svg id="icon-play" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><path d="M7 4v16l13-8z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Scrollable Content -->
+  <main class="app-content">
+
+    <!-- Status Banner / Headline Card -->
+    <section class="card status-card" id="status-card">
+      <div class="status-badge" id="status-badge">SKANOWANIE...</div>
+      <h2 class="status-headline" id="status-headline">Sprawdzam terminy...</h2>
+      <p class="status-subline" id="status-subline">WORD Warszawa M/E Odlewnicza</p>
+      <div class="status-detail" id="status-detail"></div>
+
+      <div class="countdown-bar">
+        <div class="countdown-item">
+          <span class="label">Następny sprawdzian:</span>
+          <span class="value" id="next-check-val">--:--</span>
+        </div>
+        <div class="countdown-item">
+          <span class="label">Sesja mObywatel:</span>
+          <span class="value" id="session-val">Brak sesji</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Found Slots Highlight (Current Hits) -->
+    <section class="card hits-card" id="hits-card" style="display: none;">
+      <div class="card-header">
+        <h3>🎉 Znalezione wolne terminy!</h3>
+      </div>
+      <div id="hits-list" class="hits-list"></div>
+    </section>
+
+    <!-- Session & Cookie Manager Sheet -->
+    <section class="card session-card">
+      <div class="card-header">
+        <h3>🔑 Sesja mObywatel</h3>
+        <span class="badge" id="session-status-badge">Nieaktywna</span>
+      </div>
+      <p class="card-desc">Aby bot działał 24/7 w tle, wklej poniżej wartości ciasteczek pobranych po zalogowaniu na info-kierowca.pl.</p>
+      
+      <div class="input-group">
+        <label for="cookie-pudojt">__Secure-PUDOJT</label>
+        <input type="text" id="cookie-pudojt" placeholder="Wklej wartość __Secure-PUDOJT">
+      </div>
+
+      <div class="input-group">
+        <label for="cookie-pudojtmd">__Secure-PUDOJTMD</label>
+        <input type="text" id="cookie-pudojtmd" placeholder="Wklej wartość __Secure-PUDOJTMD">
+      </div>
+
+      <div class="btn-row">
+        <button id="save-session-btn" class="btn btn-primary">Zapisz i Aktywuj Sesję</button>
+      </div>
+    </section>
+
+    <!-- History Timeline -->
+    <section class="card history-card">
+      <div class="card-header">
+        <h3>📜 Historia zdarzeń</h3>
+      </div>
+      <div id="history-list" class="history-list">
+        <div class="history-empty">Brak historii sprawdzajów. Uruchom poller.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Settings Modal Sheet -->
+  <div class="modal-overlay" id="settings-modal" style="display: none;">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2>⚙️ Ustawienia Bota</h2>
+        <button class="close-btn" id="close-settings-btn">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <form id="settings-form">
+          <fieldset>
+            <legend>Dane Egzaminu</legend>
+
+            <div class="input-group">
+              <label for="set-pkk">Numer PKK</label>
+              <input type="text" id="set-pkk" placeholder="Np. 12345/6789/2026">
+            </div>
+
+            <div class="input-group">
+              <label>Typ Egzaminu</label>
+              <div class="pill-group">
+                <button type="button" class="pill active" data-type="Practice">Praktyka</button>
+                <button type="button" class="pill" data-type="Theory">Teoria</button>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>Kategoria Prawa Jazdy</label>
+              <select id="set-category">
+                <option value="B">Kategoria B</option>
+                <option value="A">Kategoria A</option>
+                <option value="A2">Kategoria A2</option>
+                <option value="AM">Kategoria AM</option>
+                <option value="C">Kategoria C</option>
+                <option value="CE">Kategoria C+E</option>
+                <option value="D">Kategoria D</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="set-current-date">Obecnie zarezerwowana data (limit)</label>
+              <input type="date" id="set-current-date">
+              <span class="field-hint">Bot będzie szukał terminów TYLKO wcześniejszych niż ta data.</span>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Wybrane Ośrodki WORD</legend>
+            <div class="input-group">
+              <label for="word-search">Szukaj WORD-u</label>
+              <input type="text" id="word-search" placeholder="Wpisz miasto lub kod WORD...">
+              <div id="word-dropdown" class="dropdown-list" style="display:none;"></div>
+            </div>
+            <div id="selected-words" class="selected-words-list"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Powiadomienia & Tło 24/7</legend>
+
+            <div class="toggle-row">
+              <div class="toggle-info">
+                <span class="toggle-title">Dźwiękowy Alarm Wibracyjny</span>
+                <span class="toggle-sub">Telefon głośno zadzwoni po znalezieniu terminu.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="set-audio-alarm" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <div class="toggle-info">
+                <span class="toggle-title">Praca w tle (Wakelock 24/7)</span>
+                <span class="toggle-sub">Utrzymuj procesor aktywny przy zgaszonym ekranie.</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="set-wakelock" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="input-group">
+              <label for="set-ntfy-channel">Kanał ntfy.sh (Push)</label>
+              <input type="text" id="set-ntfy-channel" placeholder="Np. moj-tajny-kanal-pkk">
+            </div>
+
+            <div class="input-group">
+              <label for="set-poll-interval">Częstotliwość odpytywania (sekundy)</label>
+              <input type="number" id="set-poll-interval" min="15" max="300" value="15">
+            </div>
+          </fieldset>
+
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary">Zapisz Ustawienia</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Bottom Nav Bar -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" id="nav-dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Status</span>
+    </button>
+
+    <button class="nav-item" id="nav-sound-test">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+      <span>Test Dźwięku</span>
+    </button>
+
+    <button class="nav-item" id="nav-settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.97 7.97 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a8 8 0 0 0-1.7-1L14.9 3h-4l-.4 2.9a8 8 0 0 0-1.7 1l-2.5-1-2 3.5L6.4 11a7.97 7.97 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a8 8 0 0 0 1.7 1l.4 2.9h4l.4-2.9a8 8 0 0 0 1.7-1l2.5 1 2-3.5z"/></svg>
+      <span>Ustawienia</span>
+    </button>
+  </nav>
+
+  <!-- Scripts -->
+  <script src="js/app.js"></script>
+</body>
+</html>

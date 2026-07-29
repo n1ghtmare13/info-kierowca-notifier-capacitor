@@ -1,0 +1,19 @@
+{
+  "appId": "pl.infokierowca.notifier",
+  "appName": "Info-Kierowca Notifier",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon_config_sample",
+      "iconColor": "#6A9C7C",
+      "sound": "beep.wav"
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
