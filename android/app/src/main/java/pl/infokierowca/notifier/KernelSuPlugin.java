@@ -22,9 +22,9 @@ public class KernelSuPlugin extends Plugin {
             DataOutputStream os = new DataOutputStream(process.getOutputStream());
             
             // Script:
-            // 1. Grant directory traversal permissions (chmod 755) to /data/data/com.android.chrome/app_chrome
-            // 2. Direct copy of all candidate Cookies files
-            // 3. Query sqlite3 by cookie name '%PUDOJT%' for 100% domain match immunity
+            // 1. Temporarily grant traversal access (chmod 755) & setenforce 0
+            // 2. Perform file copy
+            // 3. IMMEDIATELY RESTORE CHMOD 700 & SELinux enforcing state for security!
             String script = 
                 "SE_STATE=$(getenforce 2>/dev/null)\n" +
                 "setenforce 0 2>/dev/null\n" +
@@ -53,6 +53,8 @@ public class KernelSuPlugin extends Plugin {
                 "    fi\n" +
                 "  fi\n" +
                 "done\n" +
+                "chmod -R 700 /data/data/com.android.chrome/app_chrome 2>/dev/null\n" +
+                "chmod -R 700 /data/user/0/com.android.chrome/app_chrome 2>/dev/null\n" +
                 "if [ \"$SE_STATE\" = \"Enforcing\" ]; then\n" +
                 "  setenforce 1 2>/dev/null\n" +
                 "fi\n" +
