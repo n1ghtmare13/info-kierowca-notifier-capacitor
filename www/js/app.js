@@ -86,13 +86,18 @@
     }
   }
 
+  // Register Native KernelSU Plugin
+  const KernelSuPlugin = (window.Capacitor && typeof window.Capacitor.registerPlugin === 'function')
+    ? window.Capacitor.registerPlugin('KernelSu')
+    : null;
+
   // --- KernelSU Root Cookie Extractor ---
   async function fetchCookiesViaKernelSu() {
     addLog("Wywołuję Root (KernelSU) do odczytu bazy Chrome...");
 
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KernelSu) {
+    if (KernelSuPlugin) {
       try {
-        const res = await window.Capacitor.Plugins.KernelSu.fetchChromeCookies();
+        const res = await KernelSuPlugin.fetchChromeCookies();
         if (res && res.success && res.pudojt) {
           saveSession(res.pudojt, res.pudojtmd || '');
           addLog("✅ Odczytano ciasteczka sesji przez KernelSU!");
@@ -107,7 +112,7 @@
         alert("Wystąpił błąd podczas wywołania KernelSU: " + err.message);
       }
     } else {
-      alert("Wtyczka KernelSU dostępna w zainstalowanej aplikacji Android (.apk).");
+      alert("Przeglądarka WWW: funkcja wymaga aplikacji Android .apk z KernelSU.");
     }
   }
 
