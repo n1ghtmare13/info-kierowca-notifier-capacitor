@@ -1,5 +1,5 @@
 /**
- * Info-Kierowca Notifier Engine - Complete Port
+ * Info-Kierowca Notifier Mobile - 1:1 Feature Port with KernelSU Integration
  */
 
 (function () {
@@ -29,6 +29,8 @@
   let currentHits = [];
   let isPaused = false;
   let pollTimer = null;
+  let countdownTimer = null;
+  let nextCheckTimestamp = null;
   let wordCentersData = [];
 
   const $ = id => document.getElementById(id);
@@ -39,6 +41,7 @@
     updateStatusUI();
     requestWakeLock();
     startPollingLoop();
+    startCountdownLoop();
   });
 
   function loadConfig() {
@@ -83,33 +86,51 @@
     }
   }
 
-  // --- Automatic Cookie Capturing ---
-  async function launchInAppLogin() {
-    const loginUrl = "https://info-kierowca.pl/login";
-    addLog("Uruchamiam wbudowane okno logowania mObywatel...");
+  // --- KernelSU Root Cookie Extractor ---
+  async function fetchCookiesViaKernelSu() {
+    addLog("Wywołuję Root (KernelSU) do odczytu bazy Chrome...");
 
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KernelSu) {
+      try {
+        const res = await window.Capacitor.Plugins.KernelSu.fetchChromeCookies();
+        if (res && res.success && res.pudojt) {
+          saveSession(res.pudojt, res.pudojtmd || '');
+          addLog("✅ Odczytano ciasteczka sesji przez KernelSU!");
+          alert("Sukces! Pobrano sesję mObywatel z Chrome.");
+          runCheck();
+        } else {
+          addLog(`⚠️ KernelSU: ${res.message || 'Brak ciasteczek w Chrome'}`);
+          alert(res.message || "Zaloguj się wpierw w przeglądarce Chrome na info-kierowca.pl");
+        }
+      } catch (err) {
+        addLog(`⚠️ KernelSU error: ${err.message}`);
+        alert("Wystąpił błąd podczas wywołania KernelSU: " + err.message);
+      }
+    } else {
+      alert("Wtyczka KernelSU dostępna w zainstalowanej aplikacji Android (.apk).");
+    }
+  }
+
+  function openChromeBrowser() {
+    const loginUrl = "https://info-kierowca.pl/login";
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
-      await window.Capacitor.Plugins.Browser.open({ url: loginUrl });
+      window.Capacitor.Plugins.Browser.open({ url: loginUrl });
     } else {
       window.open(loginUrl, '_blank');
     }
   }
 
-  async function fetchCookiesViaRoot() {
-    addLog("Próba odczytu bazy danych Chrome (Root su)...");
-    alert("Funkcja Root: Na zrootowanym telefonie skrypt pobiera bazę SQLite z /data/data/com.android.chrome. Upewnij się, że przyznasz uprawnienia SU dla Termuxa/Apki.");
-  }
-
-  // --- Main Search Check ---
+  // --- Search Polling Engine ---
   async function runCheck() {
     if (isPaused) return;
 
     if (!session.pudojt) {
-      setUIState("error", "Brak aktywnej sesji", "Zaloguj się mObywatelem w sekcji powyżej.");
+      setUIState("error", "Wymagane logowanie mObywatel", "Zaloguj się w Chrome i kliknij 'Pobierz sesję z Chrome (KernelSU)'.");
       return;
     }
 
-    setUIState("scanning", "Sprawdzam terminy...", getCentersSummary());
+    setUIState("scanning", "Sprawdzam...", getCentersSummary());
+    nextCheckTimestamp = Date.now() + (Math.max(15, config.poll_interval_seconds) * 1000);
 
     try {
       const chunks = prepareChunks(config.organization_ids);
@@ -128,18 +149,18 @@
         const fastest = matchingHits[0];
         const dateStr = fmtDate(fastest.datetime);
 
-        setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} (${fastest.places} wolne miejsca)`);
+        setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} · Miejsc: ${fastest.places}`);
         addLog(`HIT: ${dateStr} · ${fastest.word}`);
 
         triggerAlerts(fastest);
       } else {
         currentHits = [];
-        setUIState("scanning", "Brak wcześniejszych terminów", `Ostatni sprawdzian: ${new Date().toLocaleTimeString()}`);
-        addLog(`Sprawdzono. Brak terminów przed ${config.current_slot_date}`);
+        setUIState("scanning", "Sprawdzam...", `Brak terminów przed ${config.current_slot_date}`);
+        addLog(`Sprawdzono. Brak wolnych terminów.`);
       }
 
     } catch (err) {
-      setUIState("error", "Błąd połączenia / Sesja wygasła", err.message);
+      setUIState("error", "Błąd sesji / połączenia", err.message);
       addLog(`Błąd: ${err.message}`);
     }
   }
@@ -189,10 +210,7 @@
       const d = new Date(dateStr);
       const hour = d.getHours();
 
-      // Hour range filter
-      if (hour < config.earliest_slot_hour || hour > config.latest_slot_hour) {
-        continue;
-      }
+      if (hour < config.earliest_slot_hour || hour > config.latest_slot_hour) continue;
 
       if (d < maxDate) {
         hits.push({
@@ -224,26 +242,24 @@
   }
 
   function triggerAlerts(slot) {
-    const title = `Wolny termin: ${fmtDate(slot.datetime)}`;
-    const body = `${slot.word} (${slot.places} wolne miejsca)`;
+    const title = `🚨 Wolny termin: ${fmtDate(slot.datetime)}`;
+    const body = `${slot.word} (Wolne miejsca: ${slot.places})`;
 
-    if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
+    if (navigator.vibrate) navigator.vibrate([500, 250, 500, 250, 500]);
 
     if (config.ntfy_channel) {
       fetch(`https://ntfy.sh/${config.ntfy_channel}`, {
         method: 'POST',
         headers: { 'Title': title, 'Priority': 'high' },
         body: body
-      }).catch(e => console.warn("ntfy push error", e));
+      }).catch(e => console.warn("ntfy error", e));
     }
   }
 
   async function requestWakeLock() {
     if (!config.wakelock_enabled) return;
     try {
-      if ('wakeLock' in navigator) {
-        await navigator.wakeLock.request('screen');
-      }
+      if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
     } catch (e) {
       console.warn("Wakelock error", e);
     }
@@ -255,54 +271,131 @@
     pollTimer = setInterval(runCheck, Math.max(15, config.poll_interval_seconds) * 1000);
   }
 
-  // --- UI Handlers ---
+  function startCountdownLoop() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      if (isPaused) {
+        $('countdown').textContent = "Pauza";
+        return;
+      }
+      if (nextCheckTimestamp) {
+        const diff = Math.max(0, Math.round((nextCheckTimestamp - Date.now()) / 1000));
+        const m = Math.floor(diff / 60);
+        const s = diff % 60;
+        $('countdown').textContent = `Następny sprawdzian za ${m}:${s < 10 ? '0' : ''}${s}`;
+      }
+      updateSessionExpiryDisplay();
+    }, 1000);
+  }
+
+  function updateSessionExpiryDisplay() {
+    if (!session.captured_at) {
+      $('session-expiry').textContent = "Brak sesji";
+      return;
+    }
+    const captured = new Date(session.captured_at).getTime();
+    const expires = captured + (3600 * 1000);
+    const left = Math.max(0, Math.round((expires - Date.now()) / 1000));
+    const leftMin = Math.floor(left / 60);
+
+    if (leftMin <= 0) {
+      $('session-expiry').textContent = "Sesja wygasła";
+    } else {
+      $('session-expiry').textContent = `Sesja wygasa za ~${leftMin} min`;
+    }
+  }
+
+  // --- UI Handlers & Setup ---
   function initUI() {
-    $('set-pkk').value = config.profile_number || '';
-    $('set-category').value = config.category || 'B';
-    $('set-exam-type').value = config.exam_type || 'Practice';
-    $('set-max-date').value = config.current_slot_date || '2026-09-02';
-    $('set-earliest-hour').value = config.earliest_slot_hour || 7;
-    $('set-latest-hour').value = config.latest_slot_hour || 20;
-    $('set-auto-confirm').checked = !!config.auto_confirm_reschedule;
-    $('set-auto-select').checked = !!config.auto_select_slot;
-    $('set-auto-open').checked = config.auto_open_browser !== false;
-    $('set-wakelock').checked = config.wakelock_enabled !== false;
-    $('set-ntfy').value = config.ntfy_channel || '';
-    $('set-interval').value = config.poll_interval_seconds || 15;
+    $('profile_number').value = config.profile_number || '';
+    $('current_slot_date').value = config.current_slot_date || '2026-09-02';
+    $('earliest_hour').value = config.earliest_slot_hour || 7;
+    $('latest_hour').value = config.latest_slot_hour || 20;
+    updateHoursLabel();
 
-    $('auto-login-btn').addEventListener('click', launchInAppLogin);
-    $('root-fetch-btn').addEventListener('click', fetchCookiesViaRoot);
+    $('auto_confirm_reschedule').checked = !!config.auto_confirm_reschedule;
+    $('auto_select_slot').checked = !!config.auto_select_slot;
+    $('auto_open_browser').checked = config.auto_open_browser !== false;
+    $('wakelock_enabled').checked = config.wakelock_enabled !== false;
+    $('poll_interval_seconds').value = config.poll_interval_seconds || 15;
+    $('poll-interval-label').textContent = `co ${config.poll_interval_seconds || 15}s`;
+    $('ntfy_channel').value = config.ntfy_channel || '';
 
-    $('save-manual-cookies').addEventListener('click', () => {
+    // Buttons
+    $('kernelsu-fetch-btn').addEventListener('click', fetchCookiesViaKernelSu);
+    $('session-refresh-btn').addEventListener('click', fetchCookiesViaKernelSu);
+    $('open-chrome-btn').addEventListener('click', openChromeBrowser);
+
+    $('save-manual-cookies-btn').addEventListener('click', () => {
       const p1 = $('cookie-pudojt').value;
       const p2 = $('cookie-pudojtmd').value;
-      if (!p1) { alert("Wprowadź ciasteczko __Secure-PUDOJT"); return; }
+      if (!p1) { alert("Wprowadź __Secure-PUDOJT"); return; }
       saveSession(p1, p2);
-      alert("Zapisano sesję. Uruchamiam sprawdzanie.");
+      alert("Zapisano sesję.");
       runCheck();
     });
 
     $('pause-btn').addEventListener('click', () => {
       isPaused = !isPaused;
-      $('pause-text').textContent = isPaused ? "Wznów" : "Pauza";
+      $('icon-pause').style.display = isPaused ? 'none' : 'block';
+      $('icon-play').style.display = isPaused ? 'block' : 'none';
       updateStatusUI();
     });
 
-    $('config-form').addEventListener('submit', (e) => {
+    // Exam Type Pills
+    $('pill-practice').addEventListener('click', () => {
+      config.exam_type = 'Practice';
+      $('pill-practice').classList.add('active');
+      $('pill-theory').classList.remove('active');
+    });
+    $('pill-theory').addEventListener('click', () => {
+      config.exam_type = 'Theory';
+      $('pill-theory').classList.add('active');
+      $('pill-practice').classList.remove('active');
+    });
+
+    // Category Pills
+    const catPills = document.querySelectorAll('.cat-pill');
+    catPills.forEach(btn => {
+      btn.addEventListener('click', () => {
+        catPills.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        config.category = btn.dataset.cat;
+      });
+    });
+
+    // Hour Range Sliders
+    $('earliest_hour').addEventListener('input', updateHoursLabel);
+    $('latest_hour').addEventListener('input', updateHoursLabel);
+
+    $('poll_interval_seconds').addEventListener('input', (e) => {
+      $('poll-interval-label').textContent = `co ${e.target.value}s`;
+    });
+
+    $('test-push-btn').addEventListener('click', () => {
+      const ch = $('ntfy_channel').value.trim();
+      if (!ch) { alert("Wprowadź nazwę kanału ntfy"); return; }
+      fetch(`https://ntfy.sh/${ch}`, {
+        method: 'POST',
+        headers: { 'Title': 'Test Notifiera', 'Priority': 'high' },
+        body: 'Powiadomienie testowe z info-kierowca notifier!'
+      }).then(() => alert("Wysłano powiadomienie testowe na ntfy.sh")).catch(e => alert("Błąd: " + e.message));
+    });
+
+    // Form Submit
+    $('wiz-form').addEventListener('submit', (e) => {
       e.preventDefault();
       saveConfig({
-        profile_number: $('set-pkk').value,
-        category: $('set-category').value,
-        exam_type: $('set-exam-type').value,
-        current_slot_date: $('set-max-date').value,
-        earliest_slot_hour: parseInt($('set-earliest-hour').value) || 7,
-        latest_slot_hour: parseInt($('set-latest-hour').value) || 20,
-        auto_confirm_reschedule: $('set-auto-confirm').checked,
-        auto_select_slot: $('set-auto-select').checked,
-        auto_open_browser: $('set-auto-open').checked,
-        wakelock_enabled: $('set-wakelock').checked,
-        ntfy_channel: $('set-ntfy').value,
-        poll_interval_seconds: parseInt($('set-interval').value) || 15
+        profile_number: $('profile_number').value,
+        current_slot_date: $('current_slot_date').value,
+        earliest_slot_hour: parseInt($('earliest_hour').value) || 7,
+        latest_slot_hour: parseInt($('latest_hour').value) || 20,
+        auto_confirm_reschedule: $('auto_confirm_reschedule').checked,
+        auto_select_slot: $('auto_select_slot').checked,
+        auto_open_browser: $('auto_open_browser').checked,
+        wakelock_enabled: $('wakelock_enabled').checked,
+        poll_interval_seconds: parseInt($('poll_interval_seconds').value) || 15,
+        ntfy_channel: $('ntfy_channel').value.trim()
       });
       alert("Zapisano ustawienia.");
       startPollingLoop();
@@ -311,9 +404,17 @@
     setupWordSearch();
   }
 
+  function updateHoursLabel() {
+    let e = parseInt($('earliest_hour').value) || 7;
+    let l = parseInt($('latest_hour').value) || 20;
+    if (e > l) { e = l; $('earliest_hour').value = e; }
+    const fmt = h => (h < 10 ? '0' : '') + h + ':00';
+    $('hours-range-label').textContent = `${fmt(e)} – ${fmt(l)}`;
+  }
+
   function setupWordSearch() {
-    const input = $('word-search-input');
-    const dropdown = $('word-dropdown-results');
+    const input = $('center-search');
+    const dropdown = $('center-dropdown');
 
     input.addEventListener('input', () => {
       const q = input.value.toLowerCase().trim();
@@ -339,68 +440,67 @@
         if (!config.organization_ids.includes(id)) {
           config.organization_ids.push(id);
           saveConfig({ organization_ids: config.organization_ids });
-          renderWordTags();
+          renderSelectedCenters();
         }
         dropdown.style.display = 'none';
         input.value = '';
       }
     });
 
-    renderWordTags();
+    renderSelectedCenters();
   }
 
-  function renderWordTags() {
-    const container = $('selected-words-tags');
+  function renderSelectedCenters() {
+    const container = $('selected-centers');
     container.innerHTML = config.organization_ids.map(id => `
-      <span class="tag">
-        ${getWordName(id)}
-        <span class="remove" onclick="removeTag(${id})">&times;</span>
-      </span>
+      <div class="selected-center-row">
+        <span>${getWordName(id)}</span>
+        <span class="remove-btn" onclick="removeCenter(${id})">&times;</span>
+      </div>
     `).join('');
   }
 
-  window.removeTag = function (id) {
+  window.removeCenter = function (id) {
     config.organization_ids = config.organization_ids.filter(x => x !== id);
     saveConfig({ organization_ids: config.organization_ids });
-    renderWordTags();
+    renderSelectedCenters();
   };
 
   function updateStatusUI() {
-    const indicator = $('session-indicator');
+    const badge = $('session-badge');
     if (session.pudojt) {
-      indicator.textContent = "Aktywna";
-      indicator.className = "status-indicator active";
+      badge.textContent = "Aktywna";
+      badge.className = "badge active";
+      $('cookie-pudojt').value = session.pudojt;
+      $('cookie-pudojtmd').value = session.pudojtmd || '';
     } else {
-      indicator.textContent = "Nieaktywna";
-      indicator.className = "status-indicator";
+      badge.textContent = "Nieaktywna";
+      badge.className = "badge";
     }
   }
 
-  function setUIState(type, headline, subline) {
-    $('main-headline').textContent = headline;
-    $('main-subline').textContent = subline;
+  function setUIState(type, headlineText, sublineText) {
+    $('headline').textContent = headlineText;
+    $('subline').textContent = sublineText;
     const dot = $('status-dot');
 
     if (type === 'hit') {
-      dot.className = 'pulse-dot error';
-      $('status-tag').textContent = 'ZNALAZŁEM TERMIN!';
+      dot.className = 'status-dot error';
       $('hits-container').style.display = 'block';
       renderHits();
     } else if (type === 'error') {
-      dot.className = 'pulse-dot error';
-      $('status-tag').textContent = 'BŁĄD';
+      dot.className = 'status-dot error';
     } else {
-      dot.className = 'pulse-dot';
-      $('status-tag').textContent = 'SKANOWANIE';
+      dot.className = 'status-dot';
       $('hits-container').style.display = 'none';
     }
   }
 
   function renderHits() {
     $('hits-container').innerHTML = currentHits.map(h => `
-      <div class="hit-row">
-        <div class="title">${fmtDate(h.datetime)}</div>
-        <div class="sub">${h.word} (miejsc: ${h.places})</div>
+      <div class="hit-item">
+        <div class="hi-title">📅 ${fmtDate(h.datetime)}</div>
+        <div class="hi-sub">📍 ${h.word} (Wolne miejsca: ${h.places})</div>
       </div>
     `).join('');
   }
@@ -410,9 +510,9 @@
     historyLogs.unshift({ time, msg });
     if (historyLogs.length > 50) historyLogs.pop();
 
-    $('history-box').innerHTML = historyLogs.map(l => `
-      <div class="log-item">
-        <span class="time">${l.time}</span>
+    $('history').innerHTML = historyLogs.map(l => `
+      <div class="history-item">
+        <span class="ts">${l.time}</span>
         <span>${l.msg}</span>
       </div>
     `).join('');

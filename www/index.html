@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Info-Kierowca Notifier</title>
+  <title>info-kierowca notifier</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -11,49 +11,58 @@
 </head>
 <body>
 
-  <!-- Header -->
-  <header class="header">
-    <div class="brand">
-      <span class="pulse-dot" id="status-dot"></span>
-      <span class="brand-name">info-kierowca</span>
+  <!-- Top Toolbar -->
+  <header class="toolbar">
+    <div class="toolbar-brand">
+      <span class="status-dot" id="status-dot"></span>
+      <span class="brand-title">info-kierowca notifier</span>
     </div>
-    <button id="pause-btn" class="header-btn" aria-label="Pauza/Wznów">
-      <span id="pause-text">Pauza</span>
-    </button>
+    <div class="toolbar-actions">
+      <button id="pause-btn" class="icon-btn" title="Pauza / Wznów" aria-label="Pause/Resume">
+        <svg id="icon-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="4" width="4" height="16" rx="1"/><rect x="15" y="4" width="4" height="16" rx="1"/></svg>
+        <svg id="icon-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M7 4v16l13-8z"/></svg>
+      </button>
+    </div>
   </header>
 
-  <main class="container">
+  <main class="page-container">
 
-    <!-- Primary Status Card -->
-    <section class="card status-box">
-      <div class="status-meta">
-        <span class="pill-tag" id="status-tag">Skanowanie</span>
-        <span class="time-tag" id="next-check-time">--:--</span>
+    <!-- 1. Main Dashboard Banner (Matches dashboard_server.py 1:1) -->
+    <section class="card dashboard-card">
+      <div id="headline-wrap">
+        <h1 id="headline">Sprawdzam...</h1>
+      </div>
+      <div id="subline"></div>
+      <div id="detail"></div>
+      <div id="countdown">Następny sprawdzian za 0:15</div>
+      
+      <div id="session-expiry-wrap">
+        <span id="session-expiry">Sesja wygasa za 60 min</span>
+        <button id="session-refresh-btn" type="button" title="Odśwież sesję przez KernelSU / Chrome">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>
+        </button>
       </div>
 
-      <h1 class="headline" id="main-headline">Sprawdzam terminy...</h1>
-      <p class="subline" id="main-subline">WORD Warszawa M/E Odlewnicza</p>
-
-      <div id="hits-container" class="hits-box" style="display:none;"></div>
+      <!-- Hits list container -->
+      <div id="hits-container" class="hits-container" style="display:none;"></div>
     </section>
 
-    <!-- Session & Auto Login -->
+    <!-- KernelSU & mObywatel Session Card -->
     <section class="card">
-      <div class="card-head">
-        <h2>Sesja mObywatel</h2>
-        <span class="status-indicator" id="session-indicator">Nieaktywna</span>
+      <div class="card-title">
+        <h2>🔒 Sesja mObywatel (KernelSU)</h2>
+        <span class="badge" id="session-badge">Nieaktywna</span>
       </div>
-
-      <p class="card-desc">Nie musisz niczego kopiować ręcznie. Kliknij przycisk poniżej, aby zalogować się wbudowaną przeglądarką lub pobrać ciasteczka z systemu (Root).</p>
-
-      <div class="button-group">
-        <button id="auto-login-btn" class="btn btn-primary">Zaloguj przez mObywatel (Wbudowana przeglądarka)</button>
-        <button id="root-fetch-btn" class="btn btn-secondary">Pobierz sesję z Chrome (Root)</button>
+      <p class="card-desc">KernelSU odczytuje ciasteczka bezpośrednio z przeglądarki Chrome po zalogowaniu mObywatelem. Zero kopiowania.</p>
+      
+      <div class="btn-group">
+        <button id="kernelsu-fetch-btn" class="btn btn-primary">Pobierz sesję z Chrome (KernelSU Root)</button>
+        <button id="open-chrome-btn" class="btn btn-secondary">Otwórz info-kierowca.pl w Chrome</button>
       </div>
 
       <details class="manual-accordion">
-        <summary>Ręczne wprowadzanie ciasteczek</summary>
-        <div class="manual-inputs">
+        <summary>Pokaż wklejanie ręczne (Opcjonalnie)</summary>
+        <div class="manual-fields">
           <div class="field">
             <label for="cookie-pudojt">__Secure-PUDOJT</label>
             <input type="text" id="cookie-pudojt">
@@ -62,140 +71,156 @@
             <label for="cookie-pudojtmd">__Secure-PUDOJTMD</label>
             <input type="text" id="cookie-pudojtmd">
           </div>
-          <button id="save-manual-cookies" class="btn btn-small">Zapisz ciasteczka</button>
+          <button id="save-manual-cookies-btn" class="btn btn-sm">Zapisz ręcznie</button>
         </div>
       </details>
     </section>
 
-    <!-- Settings Section -->
+    <!-- 2. Settings Form (Matches WIZARD_PAGE 1:1 in order) -->
+    <form id="wiz-form" class="card">
+
+      <!-- Fieldset 1: Exam & Centers -->
+      <fieldset>
+        <legend>Egzamin i ośrodki</legend>
+
+        <div class="field">
+          <label for="profile_number">Numer PKK</label>
+          <input type="text" id="profile_number" placeholder="12345/6789/2026">
+        </div>
+
+        <div class="field">
+          <label>Typ egzaminu</label>
+          <div class="pill-group">
+            <button type="button" class="pill active" id="pill-practice">Praktyczny</button>
+            <button type="button" class="pill" id="pill-theory">Teoretyczny</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Kategoria prawa jazdy</label>
+          <div class="cat-group" id="cat-group">
+            <button type="button" class="cat-pill active" data-cat="B">B</button>
+            <button type="button" class="cat-pill" data-cat="A">A</button>
+            <button type="button" class="cat-pill" data-cat="A2">A2</button>
+            <button type="button" class="cat-pill" data-cat="AM">AM</button>
+            <button type="button" class="cat-pill" data-cat="C">C</button>
+            <button type="button" class="cat-pill" data-cat="CE">C+E</button>
+            <button type="button" class="cat-pill" data-cat="D">D</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="center-search">Ośrodki WORD</label>
+          <div class="combobox">
+            <input type="text" id="center-search" placeholder="Szukaj miasta lub nazwy WORD...">
+            <div id="center-dropdown" class="dropdown" style="display:none;"></div>
+          </div>
+          <div id="selected-centers" class="selected-centers-list"></div>
+        </div>
+      </fieldset>
+
+      <!-- Fieldset 2: Time & Date Slot Filters -->
+      <fieldset>
+        <legend>Filtry godzinowe i terminowe</legend>
+
+        <div class="field">
+          <label for="current_slot_date">Obecny termin (Maksymalna data)</label>
+          <input type="date" id="current_slot_date">
+          <div class="hint">Bot szuka wyłącznie terminów wcześniejszych niż ten dzień.</div>
+        </div>
+
+        <!-- Dual Range Time Slider -->
+        <div class="field">
+          <div class="freq-head">
+            <label>Zakres godzinowy</label>
+            <span class="freq-value" id="hours-range-label">07:00 – 20:00</span>
+          </div>
+          <div class="dual-range-box">
+            <input type="range" id="earliest_hour" min="6" max="22" value="7">
+            <input type="range" id="latest_hour" min="6" max="22" value="20">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Fieldset 3: Automations -->
+      <fieldset>
+        <legend>Automatyzacje</legend>
+
+        <div class="toggle-row">
+          <div class="toggle-text">
+            <div class="tt-title">Automatyczne przebukowanie</div>
+            <div class="tt-sub">Samoistnie potwierdzaj zmianę terminu na wcześniejszy</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="auto_confirm_reschedule">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <div class="toggle-text">
+            <div class="tt-title">Automatyczny wybór terminu</div>
+            <div class="tt-sub">Wybierz najszybszy wolny slot po wykryciu</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="auto_select_slot">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <div class="toggle-text">
+            <div class="tt-title">Otwieraj przeglądarkę</div>
+            <div class="tt-sub">Uruchamiaj Chrome z kalendarzem rezerwacji</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="auto_open_browser" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="toggle-row">
+          <div class="toggle-text">
+            <div class="tt-title">Działanie w tle 24/7 (Wakelock)</div>
+            <div class="tt-sub">Trzymaj procesor aktywny przy zgaszonym ekranie</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="wakelock_enabled" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Fieldset 4: Notifications & Frequency -->
+      <fieldset>
+        <legend>Powiadomienia i częstotliwość</legend>
+
+        <div class="field">
+          <div class="freq-head">
+            <label for="poll_interval_seconds">Częstotliwość odpytywania</label>
+            <span class="freq-value" id="poll-interval-label">co 15s</span>
+          </div>
+          <input type="range" id="poll_interval_seconds" min="15" max="300" step="5" value="15">
+        </div>
+
+        <div class="field">
+          <label for="ntfy_channel">Kanał powiadomień ntfy.sh (Push)</label>
+          <div class="ntfy-row">
+            <input type="text" id="ntfy_channel" placeholder="np. moj-tajny-kanal-pkk">
+            <button type="button" id="test-push-btn">Test Push</button>
+          </div>
+        </div>
+      </fieldset>
+
+      <button type="submit" class="btn btn-primary submit-btn">Zapisz Ustawienia</button>
+    </form>
+
+    <!-- History Card -->
     <section class="card">
-      <div class="card-head">
-        <h2>Ustawienia Szukania</h2>
+      <div class="card-title">
+        <h2>Historia zdarzeń</h2>
       </div>
-
-      <form id="config-form">
-        <div class="field">
-          <label for="set-pkk">Numer PKK</label>
-          <input type="text" id="set-pkk" placeholder="12345/6789/2026">
-        </div>
-
-        <div class="field-row">
-          <div class="field">
-            <label for="set-category">Kategoria</label>
-            <select id="set-category">
-              <option value="B">B</option>
-              <option value="A">A</option>
-              <option value="A2">A2</option>
-              <option value="AM">AM</option>
-              <option value="C">C</option>
-              <option value="CE">C+E</option>
-              <option value="D">D</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="set-exam-type">Typ egzaminu</label>
-            <select id="set-exam-type">
-              <option value="Practice">Praktyczny</option>
-              <option value="Theory">Teoretyczny</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="set-max-date">Maksymalny termin (Obecna data egzaminu)</label>
-          <input type="date" id="set-max-date">
-        </div>
-
-        <div class="field-row">
-          <div class="field">
-            <label for="set-earliest-hour">Najwcześniejsza godzina</label>
-            <select id="set-earliest-hour">
-              <option value="6">06:00</option>
-              <option value="7" selected>07:00</option>
-              <option value="8">08:00</option>
-              <option value="9">09:00</option>
-              <option value="10">10:00</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="set-latest-hour">Najpóźniejsza godzina</label>
-            <select id="set-latest-hour">
-              <option value="16">16:00</option>
-              <option value="18">18:00</option>
-              <option value="20" selected>20:00</option>
-              <option value="22">22:00</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Automation Switches -->
-        <div class="toggle-group">
-          <div class="toggle-item">
-            <div>
-              <div class="toggle-label">Automatyczne przebukowanie</div>
-              <div class="toggle-sub">Samoistnie rezerwuj wcześniejszy termin</div>
-            </div>
-            <input type="checkbox" id="set-auto-confirm" class="toggle">
-          </div>
-
-          <div class="toggle-item">
-            <div>
-              <div class="toggle-label">Automatyczny wybór terminu</div>
-              <div class="toggle-sub">Wybierz najszybszy wolny slot na stronie</div>
-            </div>
-            <input type="checkbox" id="set-auto-select" class="toggle">
-          </div>
-
-          <div class="toggle-item">
-            <div>
-              <div class="toggle-label">Otwieraj przeglądarkę</div>
-              <div class="toggle-sub">Uruchamiaj strone rezerwacji po wykryciu</div>
-            </div>
-            <input type="checkbox" id="set-auto-open" class="toggle" checked>
-          </div>
-
-          <div class="toggle-item">
-            <div>
-              <div class="toggle-label">Działanie 24/7 w tle (Wakelock)</div>
-              <div class="toggle-sub">Nie uśpisz procesora przy zgaszonym ekranie</div>
-            </div>
-            <input type="checkbox" id="set-wakelock" class="toggle" checked>
-          </div>
-        </div>
-
-        <!-- WORD Selection -->
-        <div class="field">
-          <label>Wybrane Ośrodki WORD</label>
-          <input type="text" id="word-search-input" placeholder="Szukaj ośrodka WORD...">
-          <div id="word-dropdown-results" class="word-dropdown" style="display:none;"></div>
-          <div id="selected-words-tags" class="tags-list"></div>
-        </div>
-
-        <!-- Push Notifications & Interval -->
-        <div class="field">
-          <label for="set-ntfy">Kanał powiadomień ntfy.sh (Push)</label>
-          <input type="text" id="set-ntfy" placeholder="np. moj-tajny-kanal-pkk">
-        </div>
-
-        <div class="field">
-          <label for="set-interval">Interwał odpytywania (sekundy)</label>
-          <input type="number" id="set-interval" min="15" max="300" value="15">
-        </div>
-
-        <button type="submit" class="btn btn-primary">Zapisz Ustawienia</button>
-      </form>
-    </section>
-
-    <!-- History -->
-    <section class="card">
-      <div class="card-head">
-        <h2>Historia Odpytywania</h2>
-      </div>
-      <div id="history-box" class="history-log">
-        <div class="empty-log">Oczekiwanie na pierwsze sprawdzenie...</div>
-      </div>
+      <div id="history" class="history-list"></div>
     </section>
 
   </main>
