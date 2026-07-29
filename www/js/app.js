@@ -105,7 +105,10 @@
     if (plugin) {
       try {
         const res = await plugin.fetchChromeCookies();
-        if (res && res.success && res.pudojt) {
+        if (res && res.logs) {
+          addLog("=== ZRZUT DIAGNOSTYCZNY ===\n" + res.logs);
+          alert("ZRZUT DIAGNOSTYCZNY:\n\n" + res.logs);
+        } else if (res && res.success && res.pudojt) {
           saveSession(res.pudojt, res.pudojtmd || '');
           addLog("Pomyślnie odczytano ciasteczka sesji z bazy Chrome.");
           alert("Sukces! Pobrano sesję mObywatel z Chrome.");
