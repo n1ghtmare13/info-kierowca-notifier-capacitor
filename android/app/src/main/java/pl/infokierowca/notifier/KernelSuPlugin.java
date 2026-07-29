@@ -170,25 +170,11 @@ public class KernelSuPlugin extends Plugin {
             byte[] decrypted = cipher.doFinal(rawPayload);
             String decryptedText = new String(decrypted, StandardCharsets.ISO_8859_1);
 
-            // 1. Extract JWT starting with eyJ
-            Pattern jwtPattern = Pattern.compile("(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)");
-            Matcher matcher = jwtPattern.matcher(decryptedText);
+            // Extract Base64 encoded tokens starting with eyJ (both JWT and Base64 JSON metadata)
+            Pattern pattern = Pattern.compile("(eyJ[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)");
+            Matcher matcher = pattern.matcher(decryptedText);
             if (matcher.find()) {
                 return matcher.group(1);
-            }
-
-            // 2. Extract clean JSON for PUDOJTMD
-            Pattern jsonPattern = Pattern.compile("(\\{\"maxAge\".*?\\})");
-            Matcher jsonMatcher = jsonPattern.matcher(decryptedText);
-            if (jsonMatcher.find()) {
-                return jsonMatcher.group(1);
-            }
-
-            // Fallback JSON matcher
-            Pattern fallbackJsonPattern = Pattern.compile("(\\{.*?\\})");
-            Matcher fallbackMatcher = fallbackJsonPattern.matcher(decryptedText);
-            if (fallbackMatcher.find()) {
-                return cleanAscii(fallbackMatcher.group(1));
             }
 
             return cleanAscii(decryptedText);
