@@ -18,6 +18,9 @@ import java.util.Arrays;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import android.content.Intent;
+import android.net.Uri;
+
 import javax.crypto.Cipher;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.IvParameterSpec;
@@ -26,6 +29,24 @@ import javax.crypto.spec.SecretKeySpec;
 
 @CapacitorPlugin(name = "KernelSu")
 public class KernelSuPlugin extends Plugin {
+
+    @PluginMethod
+    public void openGoogleChrome(PluginCall call) {
+        String url = call.getString("url", "https://info-kierowca.pl/login");
+        JSObject ret = new JSObject();
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.setPackage("com.android.chrome");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            ret.put("success", false);
+            ret.put("message", "Nie mozna otworzyc aplikacji Google Chrome (com.android.chrome): " + e.getMessage());
+            call.resolve(ret);
+        }
+    }
 
     @PluginMethod
     public void fetchChromeCookies(PluginCall call) {

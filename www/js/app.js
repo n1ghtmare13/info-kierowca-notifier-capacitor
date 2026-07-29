@@ -168,19 +168,21 @@
     }
   }
 
-  function openChromeBrowser() {
+  async function openChromeBrowser() {
     const loginUrl = "https://info-kierowca.pl/login";
-    // Force opening Chrome package on Android if App/Browser plugin is available
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+    const plugin = getKernelSuPlugin();
+    if (plugin && typeof plugin.openGoogleChrome === 'function') {
       try {
-        window.Capacitor.Plugins.App.openUrl({ url: loginUrl });
-        return;
-      } catch(e){}
+        const res = await plugin.openGoogleChrome({ url: loginUrl });
+        if (res && res.success) return;
+      } catch (e) {
+        console.warn("openGoogleChrome failed, using fallback", e);
+      }
     }
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
       window.Capacitor.Plugins.Browser.open({ url: loginUrl });
     } else {
-      window.open(loginUrl, '_system');
+      window.open(loginUrl, '_blank');
     }
   }
 
