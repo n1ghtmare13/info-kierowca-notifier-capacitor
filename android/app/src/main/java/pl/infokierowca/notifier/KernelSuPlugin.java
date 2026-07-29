@@ -5,7 +5,7 @@ import android.database.sqlite.SQLiteDatabase;
 
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
-import.getcapacitor.PluginMethod;
+import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.JSObject;
 
@@ -31,7 +31,7 @@ public class KernelSuPlugin extends Plugin {
     public void fetchChromeCookies(PluginCall call) {
         JSObject ret = new JSObject();
         StringBuilder logs = new StringBuilder();
-        logs.append("=== ROZPOCZYNAM ODCRZYT COOKIES KERNELSU ===\n");
+        logs.append("=== ROZPOCZYNAM ODCZYT COOKIES KERNELSU ===\n");
         try {
             // 1. Verify Root
             Process rootCheck = Runtime.getRuntime().exec("su");
@@ -133,7 +133,7 @@ public class KernelSuPlugin extends Plugin {
                 new File("/data/local/tmp/ikw_chrome_cookies.db-wal").delete();
                 new File("/data/local/tmp/ikw_chrome_cookies.db-shm").delete();
             } else {
-                logs.append("❌ Nie udało się utwarzyć /data/local/tmp/ikw_chrome_cookies.db z Chrome\n");
+                logs.append("❌ Nie udało się utworzyć /data/local/tmp/ikw_chrome_cookies.db z Chrome\n");
             }
 
             ret.put("logs", logs.toString());
