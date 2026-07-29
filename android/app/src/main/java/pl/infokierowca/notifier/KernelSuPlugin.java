@@ -21,10 +21,28 @@ public class KernelSuPlugin extends Plugin {
             Process process = Runtime.getRuntime().exec("su");
             DataOutputStream os = new DataOutputStream(process.getOutputStream());
             
-            // Execute sqlite3 query against Chrome SQLite cookie database
-            String sqlCmd = "sqlite3 /data/data/com.android.chrome/app_chrome/Default/Cookies \"SELECT name, value FROM cookies WHERE host_key LIKE '%info-kierowca.pl%';\"\n";
-            os.writeBytes(sqlCmd);
-            os.writeBytes("exit\n");
+            // Shell commands:
+            // 1. Locate Chrome SQLite database (supports Chrome 120+ Network/Cookies, Default/Cookies, app_webview)
+            // 2. Copy to /data/local/tmp/ to bypass active Chrome file locks
+            // 3. Query sqlite3 for info-kierowca cookies
+            // 4. Remove temp file
+            String script = 
+                "CPATH=$(ls /data/data/com.android.chrome/app_chrome/Default/Network/Cookies " +
+                "/data/data/com.android.chrome/app_chrome/Default/Cookies " +
+                "/data/data/com.android.chrome/app_webview/Default/Cookies " +
+                "/data/data/com.android.chrome/app_webview/Cookies 2>/dev/null | head -n 1)\n" +
+                "echo \"FOUND_PATH:$CPATH\"\n" +
+                "if [ -n \"$CPATH\" ]; then\n" +
+                "  cp \"$CPATH\" /data/local/tmp/temp_cookies.db 2>/dev/null\n" +
+                "  chmod 666 /data/local/tmp/temp_cookies.db 2>/dev/null\n" +
+                "  sqlite3 /data/local/tmp/temp_cookies.db \"SELECT name, value FROM cookies WHERE host_key LIKE '%info-kierowca.pl%';\" 2>/dev/null\n" +
+                "  rm -f /data/local/tmp/temp_cookies.db\n" +
+                "else\n" +
+                "  echo \"NO_CHROME_COOKIE_FILE_FOUND\"\n" +
+                "fi\n" +
+                "exit\n";
+
+            os.writeBytes(script);
             os.flush();
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
@@ -60,7 +78,7 @@ public class KernelSuPlugin extends Plugin {
                 call.resolve(ret);
             } else {
                 ret.put("success", false);
-                ret.put("message", "Nie znaleziono ciasteczek w bazie Chrome. Zaloguj się wpierw na info-kierowca.pl w Chrome.\nLogi:\n" + logs.toString());
+                ret.put("message", "Nie odnaleziono wpisów __Secure-PUDOJT w bazie Chrome.\nSzczegóły logów:\n" + logs.toString());
                 call.resolve(ret);
             }
         } catch (Exception e) {
