@@ -87,32 +87,42 @@
   }
 
   // Register Native KernelSU Plugin
-  const KernelSuPlugin = (window.Capacitor && typeof window.Capacitor.registerPlugin === 'function')
-    ? window.Capacitor.registerPlugin('KernelSu')
-    : null;
+  function getKernelSuPlugin() {
+    if (window.Capacitor && typeof window.Capacitor.registerPlugin === 'function') {
+      try { return window.Capacitor.registerPlugin('KernelSu'); } catch (e) {}
+    }
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KernelSu) {
+      return window.Capacitor.Plugins.KernelSu;
+    }
+    return null;
+  }
 
   // --- KernelSU Root Cookie Extractor ---
   async function fetchCookiesViaKernelSu() {
-    addLog("Wywołuję Root (KernelSU) do odczytu bazy Chrome...");
+    addLog("Rozpoczynam odczyt KernelSU...");
+    const plugin = getKernelSuPlugin();
 
-    if (KernelSuPlugin) {
+    if (plugin) {
       try {
-        const res = await KernelSuPlugin.fetchChromeCookies();
+        addLog("Wywołuję komendę Root 'su' w Androidzie...");
+        const res = await plugin.fetchChromeCookies();
         if (res && res.success && res.pudojt) {
           saveSession(res.pudojt, res.pudojtmd || '');
-          addLog("✅ Odczytano ciasteczka sesji przez KernelSU!");
+          addLog("Pomyślnie odczytano ciasteczka sesji z bazy Chrome!");
           alert("Sukces! Pobrano sesję mObywatel z Chrome.");
           runCheck();
         } else {
-          addLog(`⚠️ KernelSU: ${res.message || 'Brak ciasteczek w Chrome'}`);
-          alert(res.message || "Zaloguj się wpierw w przeglądarce Chrome na info-kierowca.pl");
+          const msg = (res && res.message) ? res.message : 'Brak ciasteczek w Chrome';
+          addLog(`KernelSU Wynik: ${msg}`);
+          alert(`KernelSU Wynik:\n${msg}`);
         }
       } catch (err) {
-        addLog(`⚠️ KernelSU error: ${err.message}`);
-        alert("Wystąpił błąd podczas wywołania KernelSU: " + err.message);
+        addLog(`KernelSU Błąd Wywołania: ${err.message}`);
+        alert("Błąd wywołania KernelSU: " + err.message);
       }
     } else {
-      alert("Przeglądarka WWW: funkcja wymaga aplikacji Android .apk z KernelSU.");
+      addLog("Środowisko: Uruchomiono w przeglądarce WWW (Brak wtyczki natywnej Androida).");
+      alert("Aplikacja otwarta w przeglądarce WWW. Zainstaluj plik .apk na zrootowanym telefonie z KernelSU.");
     }
   }
 
