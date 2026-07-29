@@ -107,8 +107,12 @@
         const res = await plugin.fetchChromeCookies();
         if (res && res.success && res.pudojt) {
           saveSession(res.pudojt, res.pudojtmd || '');
-          addLog("✅ Pomyślnie odczytano i aktywowano ciasteczka sesji z bazy Chrome.");
-          alert("🎉 SUKCES! Pobrano i aktywowano sesję mObywatel z Chrome!");
+          const pudojtPrev = res.pudojt.length > 25 ? res.pudojt.substring(0, 25) + '...' : res.pudojt;
+          const pudojtmdPrev = (res.pudojtmd && res.pudojtmd.length > 25) ? res.pudojtmd.substring(0, 25) + '...' : res.pudojtmd;
+          
+          addLog(`✅ Pomyślnie odczytano i aktywowano ciasteczka!\n__Secure-PUDOJT: ${pudojtPrev}\n__Secure-PUDOJTMD: ${pudojtmdPrev || '(brak)'}`);
+          if (res.logs) addLog("=== LOGI KERNELSU ===\n" + res.logs);
+          alert(`🎉 SUKCES! Pobrano sesję mObywatel z Chrome!\n\nPUDOJT: ${pudojtPrev}`);
           runCheck();
         } else if (res && res.logs) {
           addLog("=== LOGI DIAGNOSTYCZNE ===\n" + res.logs);
@@ -156,92 +160,160 @@
 
     try {
       const chunks = prepareChunks(config.organization_ids);
-      let allSlots = [];
+      addLog(`▶ [REQ] Przygotowano ${chunks.length} paczek (po ${chunks[0] ? chunks[0].length : 0} ośrodków). Chunks: ${JSON.stringify(chunks)}`);
+      let allResults = [];
 
       for (let i = 0; i < chunks.length; i++) {
         const raw = await doPwpwRequest(chunks[i]);
-        if (Array.isArray(raw)) allSlots = allSlots.concat(raw);
+        if (Array.isArray(raw)) allResults = allResults.concat(raw);
         if (i < chunks.length - 1) await sleep(1200);
       }
 
-      const matchingHits = filterSlots(allSlots);
+      const matchingHits = filterSlots(allResults);
 
       if (matchingHits.length > 0) {
         currentHits = matchingHits;
         const fastest = matchingHits[0];
         const dateStr = fmtDate(fastest.datetime);
 
-        setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} · Miejsc: ${fastest.places}`);
-        addLog(`HIT: ${dateStr} · ${fastest.word}`);
+        setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} (${fastest.exam_type}) · Miejsc: ${fastest.places}`);
+        addLog(`✅ HIT: ${dateStr} · ${fastest.word} (${fastest.exam_type})`);
 
         triggerAlerts(fastest);
       } else {
         currentHits = [];
         const limitInfo = config.current_slot_date ? ` przed ${config.current_slot_date}` : '';
-        setUIState("scanning", "Sprawdzam...", `Brak terminów${limitInfo}`);
-        addLog(`Sprawdzono. Brak wolnych terminów.`);
+        setUIState("scanning", "Sprawdzam...", `Brak wolnych terminów${limitInfo}`);
+        addLog(`ℹ Sprawdzono (${allResults.length} wyników z PWPW). Brak wolnych terminów pasujących do kryteriów.`);
       }
 
     } catch (err) {
       setUIState("error", "Błąd sesji / połączenia", err.message);
-      addLog(`Błąd: ${err.message}`);
+      addLog(`❌ Błąd: ${err.message}`);
     }
+  }
+
+  function getCategoryId(code) {
+    if (typeof code === 'number') return code;
+    const catMap = {
+      "A": 1, "A1": 2, "A2": 3, "AM": 4, "B": 5, "B1": 6, "B+E": 7,
+      "C": 8, "C1": 9, "C+E": 10, "C1+E": 11, "D": 12, "D1": 13,
+      "D+E": 14, "D1+E": 15, "T": 16, "PT": 17
+    };
+    return catMap[code] || 5;
   }
 
   async function doPwpwRequest(orgChunk) {
     const payload = {
       startDate: new Date().toISOString().split('T')[0],
       organizationId: orgChunk,
-      category: config.category,
+      category: getCategoryId(config.category),
       profileNumber: (config.profile_number || '').replace(/\s+/g, ''),
       profileType: "Pkk"
     };
 
     const cookieStr = `__Secure-PUDOJT=${session.pudojt}; __Secure-PUDOJTMD=${session.pudojtmd || ''}`;
+    const headers = {
+      'Content-Type': 'application/json',
+      'Cookie': cookieStr,
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'Referer': 'https://info-kierowca.pl/reservation',
+      'Origin': 'https://info-kierowca.pl'
+    };
+
+    const payloadLogStr = JSON.stringify(payload);
+    addLog(`📤 Wysyłam POST na PWPW:\nPayload: ${payloadLogStr}\nOrg IDs Count: ${orgChunk.length}`);
 
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) {
       const res = await window.Capacitor.Plugins.CapacitorHttp.request({
         method: 'POST',
         url: PWPW_SEARCH_URL,
-        headers: { 'Content-Type': 'application/json', 'Cookie': cookieStr },
+        headers: headers,
         data: payload
       });
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      
+      if (res.status !== 200) {
+        const errDetail = typeof res.data === 'object' ? JSON.stringify(res.data) : (res.data || '');
+        addLog(`❌ PWPW Odpowiedź HTTP ${res.status}: ${errDetail}`);
+        throw new Error(`HTTP ${res.status} - ${errDetail || 'Bad Request'}`);
+      }
+      addLog(`📥 Otrzymano odpowiedź HTTP 200 (${Array.isArray(res.data) ? res.data.length + ' elementów' : 'obiekt'})`);
       return res.data;
     } else {
       const res = await fetch(PWPW_SEARCH_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': cookieStr },
-        body: JSON.stringify(payload)
+        headers: headers,
+        body: payloadLogStr
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
+      const textData = await res.text();
+      if (!res.ok) {
+        addLog(`❌ PWPW Odpowiedź HTTP ${res.status}: ${textData}`);
+        throw new Error(`HTTP ${res.status} - ${textData}`);
+      }
+      addLog(`📥 Otrzymano odpowiedź HTTP 200.`);
+      try { return JSON.parse(textData); } catch(e) { return []; }
     }
   }
 
-  function filterSlots(rawSlots) {
+  function filterSlots(rawResults) {
     const hits = [];
     const maxDate = config.current_slot_date ? new Date(config.current_slot_date + 'T23:59:59') : new Date('2099-12-31');
+    const watchIds = new Set(config.organization_ids.map(id => Number(id)));
+    const wantedType = config.exam_type || 'Practice';
 
-    for (const item of rawSlots) {
-      const sched = item.schedule || {};
-      const dateStr = sched.date;
-      const count = item.placePracticeAmount || item.placeTheoryAmount || 0;
+    for (const word of rawResults) {
+      const wordId = Number(word.wordId || word.organizationId);
+      if (!watchIds.has(wordId)) continue; // Discard filler/unselected exam centers
 
-      if (!dateStr || count <= 0) continue;
+      const wordName = word.wordName || getWordName(wordId);
+      const exams = word.examCollectionForDay || [];
 
-      const d = new Date(dateStr);
-      const hour = d.getHours();
+      if (exams.length > 0) {
+        for (const exam of exams) {
+          const examType = exam.examType; // 'Practice' / 'Theory' or 'Theoretical'
+          if (wantedType === 'Practice' && examType !== 'Practice') continue;
+          if (wantedType === 'Theory' && examType !== 'Theory' && examType !== 'Theoretical') continue;
 
-      if (hour < config.earliest_slot_hour || hour > config.latest_slot_hour) continue;
+          const dtStr = exam.practiceDateTime || exam.theoryDateTime;
+          if (!dtStr) continue;
 
-      if (d < maxDate) {
-        hits.push({
-          word: getWordName(item.organizationId),
-          datetime: dateStr,
-          places: count,
-          rawDate: d
-        });
+          const places = exam.placePracticeAmount || exam.placeTheoryAmount || 0;
+          if (places <= 0) continue;
+
+          const d = new Date(dtStr);
+          const hour = d.getHours();
+
+          if (hour < config.earliest_slot_hour || hour >= config.latest_slot_hour) continue;
+
+          if (d <= maxDate) {
+            hits.push({
+              word: wordName,
+              exam_type: examType === 'Practice' ? 'Praktyka' : 'Teoria',
+              datetime: dtStr,
+              places: places,
+              rawDate: d
+            });
+          }
+        }
+      } else {
+        const sched = word.schedule || {};
+        const dtStr = word.practiceDateTime || word.theoryDateTime || sched.date;
+        const places = word.placePracticeAmount || word.placeTheoryAmount || 0;
+
+        if (dtStr && places > 0) {
+          const d = new Date(dtStr);
+          const hour = d.getHours();
+
+          if (hour >= config.earliest_slot_hour && hour < config.latest_slot_hour && d <= maxDate) {
+            hits.push({
+              word: wordName,
+              exam_type: wantedType === 'Practice' ? 'Praktyka' : 'Teoria',
+              datetime: dtStr,
+              places: places,
+              rawDate: d
+            });
+          }
+        }
       }
     }
 
@@ -250,14 +322,27 @@
   }
 
   function prepareChunks(ids) {
-    const wanted = [...new Set(ids)];
+    const wanted = [...new Set(ids.map(id => Number(id)))];
     const chunks = [];
-    const pool = wordCentersData.map(w => w.id).filter(id => !wanted.includes(id));
+    const SEARCH_ORG_ID_COUNT = 5;
+    
+    let fillerPool = wordCentersData
+      .map(w => Number(w.id))
+      .filter(id => !wanted.includes(id));
 
-    for (let i = 0; i < wanted.length; i += 5) {
-      let chunk = wanted.slice(i, i + 5);
-      while (chunk.length < 5 && pool.length > 0) {
-        chunk.push(pool[Math.floor(Math.random() * pool.length)]);
+    for (let i = fillerPool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [fillerPool[i], fillerPool[j]] = [fillerPool[j], fillerPool[i]];
+    }
+
+    for (let i = 0; i < wanted.length; i += SEARCH_ORG_ID_COUNT) {
+      let chunk = wanted.slice(i, i + SEARCH_ORG_ID_COUNT);
+      let poolIdx = 0;
+      while (chunk.length < SEARCH_ORG_ID_COUNT && poolIdx < fillerPool.length) {
+        const filler = fillerPool[poolIdx++];
+        if (!chunk.includes(filler)) {
+          chunk.push(filler);
+        }
       }
       chunks.push(chunk);
     }
