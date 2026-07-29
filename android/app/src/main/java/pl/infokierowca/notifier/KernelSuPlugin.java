@@ -22,28 +22,28 @@ public class KernelSuPlugin extends Plugin {
             DataOutputStream os = new DataOutputStream(process.getOutputStream());
             
             // Script:
-            // 1. Temporarily set SELinux permissive to bypass directory traversal locks on /data/data/com.android.chrome
-            // 2. Explicitly target known Chrome & Chromium SQLite paths
-            // 3. Fallback to find
+            // 1. Grant directory traversal permissions (chmod 755) to /data/data/com.android.chrome/app_chrome
+            // 2. Direct copy of all candidate Cookies files
+            // 3. Query sqlite3 by cookie name '%PUDOJT%' for 100% domain match immunity
             String script = 
                 "SE_STATE=$(getenforce 2>/dev/null)\n" +
                 "setenforce 0 2>/dev/null\n" +
+                "chmod -R 755 /data/data/com.android.chrome/app_chrome 2>/dev/null\n" +
+                "chmod -R 755 /data/user/0/com.android.chrome/app_chrome 2>/dev/null\n" +
                 "PATHS=\"" +
-                "/data/user/0/com.android.chrome/app_chrome/Default/Network/Cookies " +
-                "/data/user/0/com.android.chrome/app_chrome/Default/Cookies " +
-                "/data/data/com.android.chrome/app_chrome/Default/Network/Cookies " +
                 "/data/data/com.android.chrome/app_chrome/Default/Cookies " +
-                "/data/user/0/com.chrome.beta/app_chrome/Default/Network/Cookies " +
+                "/data/data/com.android.chrome/app_chrome/Default/Network/Cookies " +
+                "/data/user/0/com.android.chrome/app_chrome/Default/Cookies " +
+                "/data/user/0/com.android.chrome/app_chrome/Default/Network/Cookies " +
                 "/data/data/com.chrome.beta/app_chrome/Default/Network/Cookies " +
-                "/data/user/0/com.brave.browser/app_chrome/Default/Network/Cookies " +
-                "/data/data/com.brave.browser/app_chrome/Default/Network/Cookies\"\n" +
+                "/data/user/0/com.chrome.beta/app_chrome/Default/Network/Cookies\"\n" +
                 "FOUND=0\n" +
                 "for f in $PATHS; do\n" +
-                "  if [ -f \"$f\" ]; then\n" +
-                "    echo \"TESTING_EXPLICIT_PATH:$f\"\n" +
-                "    cp \"$f\" /data/local/tmp/temp_check.db 2>/dev/null\n" +
+                "  echo \"TESTING_PATH:$f\"\n" +
+                "  cp \"$f\" /data/local/tmp/temp_check.db 2>/dev/null\n" +
+                "  if [ -f /data/local/tmp/temp_check.db ]; then\n" +
                 "    chmod 666 /data/local/tmp/temp_check.db 2>/dev/null\n" +
-                "    RES=$(sqlite3 /data/local/tmp/temp_check.db \"SELECT name, value FROM cookies WHERE host_key LIKE '%info-kierowca.pl%';\" 2>/dev/null)\n" +
+                "    RES=$(sqlite3 /data/local/tmp/temp_check.db \"SELECT name, value FROM cookies WHERE name LIKE '%PUDOJT%';\" 2>/dev/null)\n" +
                 "    rm -f /data/local/tmp/temp_check.db 2>/dev/null\n" +
                 "    if [ -n \"$RES\" ]; then\n" +
                 "      echo \"MATCH_FOUND_IN:$f\"\n" +
@@ -57,7 +57,7 @@ public class KernelSuPlugin extends Plugin {
                 "  setenforce 1 2>/dev/null\n" +
                 "fi\n" +
                 "if [ \"$FOUND\" -eq 0 ]; then\n" +
-                "  echo \"NO_MATCHING_COOKIES_FOUND\"\n" +
+                "  echo \"NO_MATCHING_PUDOJT_COOKIES_FOUND\"\n" +
                 "fi\n" +
                 "exit\n";
 
