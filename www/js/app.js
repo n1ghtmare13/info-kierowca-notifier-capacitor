@@ -11,8 +11,8 @@
     profile_number: "",
     category: "B",
     exam_type: "Practice",
-    organization_ids: [25, 26, 27, 28, 29],
-    current_slot_date: "2026-09-02",
+    organization_ids: [],
+    current_slot_date: "",
     poll_interval_seconds: 15,
     earliest_slot_hour: 7,
     latest_slot_hour: 20,
@@ -108,7 +108,7 @@
         const res = await plugin.fetchChromeCookies();
         if (res && res.success && res.pudojt) {
           saveSession(res.pudojt, res.pudojtmd || '');
-          addLog("Pomyślnie odczytano ciasteczka sesji z bazy Chrome!");
+          addLog("Pomyślnie odczytano ciasteczka sesji z bazy Chrome.");
           alert("Sukces! Pobrano sesję mObywatel z Chrome.");
           runCheck();
         } else {
@@ -144,6 +144,11 @@
       return;
     }
 
+    if (!config.organization_ids || config.organization_ids.length === 0) {
+      setUIState("error", "Wybierz ośrodki WORD", "Dodaj co najmniej jeden ośrodek WORD w formularzu ustawień poniżej.");
+      return;
+    }
+
     setUIState("scanning", "Sprawdzam...", getCentersSummary());
     nextCheckTimestamp = Date.now() + (Math.max(15, config.poll_interval_seconds) * 1000);
 
@@ -170,7 +175,8 @@
         triggerAlerts(fastest);
       } else {
         currentHits = [];
-        setUIState("scanning", "Sprawdzam...", `Brak terminów przed ${config.current_slot_date}`);
+        const limitInfo = config.current_slot_date ? ` przed ${config.current_slot_date}` : '';
+        setUIState("scanning", "Sprawdzam...", `Brak terminów${limitInfo}`);
         addLog(`Sprawdzono. Brak wolnych terminów.`);
       }
 
@@ -185,7 +191,7 @@
       startDate: new Date().toISOString().split('T')[0],
       organizationId: orgChunk,
       category: config.category,
-      profileNumber: config.profile_number.replace(/\s+/g, ''),
+      profileNumber: (config.profile_number || '').replace(/\s+/g, ''),
       profileType: "Pkk"
     };
 
@@ -213,7 +219,7 @@
 
   function filterSlots(rawSlots) {
     const hits = [];
-    const maxDate = new Date(config.current_slot_date + 'T23:59:59');
+    const maxDate = config.current_slot_date ? new Date(config.current_slot_date + 'T23:59:59') : new Date('2099-12-31');
 
     for (const item of rawSlots) {
       const sched = item.schedule || {};
@@ -253,11 +259,11 @@
       }
       chunks.push(chunk);
     }
-    return chunks.length > 0 ? chunks : [[25, 26, 27, 28, 29]];
+    return chunks;
   }
 
   function triggerAlerts(slot) {
-    const title = `🚨 Wolny termin: ${fmtDate(slot.datetime)}`;
+    const title = `Wolny termin: ${fmtDate(slot.datetime)}`;
     const body = `${slot.word} (Wolne miejsca: ${slot.places})`;
 
     if (navigator.vibrate) navigator.vibrate([500, 250, 500, 250, 500]);
@@ -323,17 +329,15 @@
   // --- UI Handlers & Setup ---
   function initUI() {
     $('profile_number').value = config.profile_number || '';
-    $('current_slot_date').value = config.current_slot_date || '2026-09-02';
+    $('current_slot_date').value = config.current_slot_date || '';
     $('earliest_hour').value = config.earliest_slot_hour || 7;
     $('latest_hour').value = config.latest_slot_hour || 20;
-    updateHoursLabel();
 
     $('auto_confirm_reschedule').checked = !!config.auto_confirm_reschedule;
     $('auto_select_slot').checked = !!config.auto_select_slot;
     $('auto_open_browser').checked = config.auto_open_browser !== false;
     $('wakelock_enabled').checked = config.wakelock_enabled !== false;
     $('poll_interval_seconds').value = config.poll_interval_seconds || 15;
-    $('poll-interval-label').textContent = `co ${config.poll_interval_seconds || 15}s`;
     $('ntfy_channel').value = config.ntfy_channel || '';
 
     // Buttons
@@ -379,21 +383,13 @@
       });
     });
 
-    // Hour Range Sliders
-    $('earliest_hour').addEventListener('input', updateHoursLabel);
-    $('latest_hour').addEventListener('input', updateHoursLabel);
-
-    $('poll_interval_seconds').addEventListener('input', (e) => {
-      $('poll-interval-label').textContent = `co ${e.target.value}s`;
-    });
-
     $('test-push-btn').addEventListener('click', () => {
       const ch = $('ntfy_channel').value.trim();
       if (!ch) { alert("Wprowadź nazwę kanału ntfy"); return; }
       fetch(`https://ntfy.sh/${ch}`, {
         method: 'POST',
         headers: { 'Title': 'Test Notifiera', 'Priority': 'high' },
-        body: 'Powiadomienie testowe z info-kierowca notifier!'
+        body: 'Powiadomienie testowe z info-kierowca notifier'
       }).then(() => alert("Wysłano powiadomienie testowe na ntfy.sh")).catch(e => alert("Błąd: " + e.message));
     });
 
@@ -417,14 +413,6 @@
     });
 
     setupWordSearch();
-  }
-
-  function updateHoursLabel() {
-    let e = parseInt($('earliest_hour').value) || 7;
-    let l = parseInt($('latest_hour').value) || 20;
-    if (e > l) { e = l; $('earliest_hour').value = e; }
-    const fmt = h => (h < 10 ? '0' : '') + h + ':00';
-    $('hours-range-label').textContent = `${fmt(e)} – ${fmt(l)}`;
   }
 
   function setupWordSearch() {
@@ -467,6 +455,10 @@
 
   function renderSelectedCenters() {
     const container = $('selected-centers');
+    if (!config.organization_ids || config.organization_ids.length === 0) {
+      container.innerHTML = '<div class="empty-words-hint">Brak wybranych ośrodków. Wpisz miasto powyżej, aby dodać.</div>';
+      return;
+    }
     container.innerHTML = config.organization_ids.map(id => `
       <div class="selected-center-row">
         <span>${getWordName(id)}</span>
@@ -514,8 +506,8 @@
   function renderHits() {
     $('hits-container').innerHTML = currentHits.map(h => `
       <div class="hit-item">
-        <div class="hi-title">📅 ${fmtDate(h.datetime)}</div>
-        <div class="hi-sub">📍 ${h.word} (Wolne miejsca: ${h.places})</div>
+        <div class="hi-title">${fmtDate(h.datetime)}</div>
+        <div class="hi-sub">${h.word} (miejsc: ${h.places})</div>
       </div>
     `).join('');
   }
@@ -539,6 +531,9 @@
   }
 
   function getCentersSummary() {
+    if (!config.organization_ids || config.organization_ids.length === 0) {
+      return "Brak wybranych ośrodków WORD";
+    }
     return `Monitoruję ${config.organization_ids.length} ośrodków WORD`;
   }
 
