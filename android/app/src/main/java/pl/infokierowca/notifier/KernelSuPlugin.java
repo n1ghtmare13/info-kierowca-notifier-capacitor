@@ -31,9 +31,9 @@ public class KernelSuPlugin extends Plugin {
     public void fetchChromeCookies(PluginCall call) {
         JSObject ret = new JSObject();
         StringBuilder logs = new StringBuilder();
-        logs.append("=== ROZPOCZYNAM DIAGNOSTYKĘ KERNELSU ===\n");
+        logs.append("=== ROZPOCZYNAM ODCRYT COOKIES KERNELSU ===\n");
         try {
-            // 1. Check Root Privilege
+            // 1. Verify Root
             Process rootCheck = Runtime.getRuntime().exec("su");
             DataOutputStream rootOs = new DataOutputStream(rootCheck.getOutputStream());
             rootOs.writeBytes("id\nexit\n");
@@ -45,99 +45,94 @@ public class KernelSuPlugin extends Plugin {
             if (idLine != null && idLine.contains("uid=0")) {
                 logs.append("✅ ROOT POTWIERDZONY: ").append(idLine).append("\n");
             } else {
-                logs.append("⚠️ OSTRZEŻENIE ROOT: ").append(idLine != null ? idLine : "Brak odpowiedzi od su").append("\n");
+                logs.append("⚠️ ROOT OSTRZEŻENIE: ").append(idLine != null ? idLine : "Brak su").append("\n");
             }
 
-            File cacheDir = getContext().getCacheDir();
-            File tempDb = new File(cacheDir, "temp_chrome_cookies.db");
+            File tempDb = new File("/data/local/tmp/ikw_chrome_cookies.db");
             if (tempDb.exists()) tempDb.delete();
 
-            String[] candidatePaths = new String[]{
-                "/data/data/com.android.chrome/app_chrome/Default/Network/Cookies",
-                "/data/data/com.android.chrome/app_chrome/Default/Cookies",
-                "/data/user/0/com.android.chrome/app_chrome/Default/Network/Cookies",
-                "/data/user/0/com.android.chrome/app_chrome/Default/Cookies",
-                "/data/data/com.chrome.beta/app_chrome/Default/Network/Cookies",
-                "/data/user/0/com.chrome.beta/app_chrome/Default/Network/Cookies"
-            };
+            // Shell script to locate and copy Chrome cookies to /data/local/tmp/ with full error reporting
+            String script = 
+                "setenforce 0\n" +
+                "FOUND_PATH=\"\"\n" +
+                "for f in " +
+                "  /data/data/com.android.chrome/app_chrome/Default/Cookies " +
+                "  /data/data/com.android.chrome/app_chrome/Default/Network/Cookies " +
+                "  /data/user/0/com.android.chrome/app_chrome/Default/Cookies " +
+                "  /data/user/0/com.android.chrome/app_chrome/Default/Network/Cookies " +
+                "  $(find /data/data/com.android.chrome/ /data/user/0/com.android.chrome/ -name \"Cookies\" 2>/dev/null) " +
+                "  $(find /data/data/ /data/user/0/ -name \"Cookies\" 2>/dev/null); do\n" +
+                "  if [ -f \"$f\" ]; then\n" +
+                "    echo \"TRYING_COPY_FROM:$f\"\n" +
+                "    cp \"$f\" /data/local/tmp/ikw_chrome_cookies.db\n" +
+                "    CP_STATUS=$?\n" +
+                "    if [ $CP_STATUS -eq 0 ] && [ -s /data/local/tmp/ikw_chrome_cookies.db ]; then\n" +
+                "      chmod 666 /data/local/tmp/ikw_chrome_cookies.db\n" +
+                "      echo \"SUCCESSFULLY_COPIED_FROM:$f\"\n" +
+                "      FOUND_PATH=\"$f\"\n" +
+                "      break\n" +
+                "    else\n" +
+                "      echo \"COPY_FAILED_FROM:$f STATUS:$CP_STATUS\"\n" +
+                "    fi\n" +
+                "  fi\n" +
+                "done\n" +
+                "setenforce 1\n" +
+                "exit\n";
+
+            Process process = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(process.getOutputStream());
+            os.writeBytes(script);
+            os.flush();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+            String line;
+            while ((line = reader.readLine()) != null) logs.append("STDOUT: ").append(line).append("\n");
+            while ((line = errorReader.readLine()) != null) logs.append("STDERR: ").append(line).append("\n");
+            process.waitFor();
 
             String pudojt = "";
             String pudojtmd = "";
 
-            for (String targetPath : candidatePaths) {
-                logs.append("\n[TEST] Ścieżka: ").append(targetPath).append("\n");
+            if (tempDb.exists() && tempDb.length() > 0) {
+                logs.append("✅ Plik bazy dostępny pod /data/local/tmp/ (rozmiar: ").append(tempDb.length()).append(" bajtów).\n");
 
-                Process process = Runtime.getRuntime().exec("su");
-                DataOutputStream os = new DataOutputStream(process.getOutputStream());
-                
-                String script = 
-                    "SE_STATE=$(getenforce 2>/dev/null)\n" +
-                    "setenforce 0 2>/dev/null\n" +
-                    "chmod -R 755 /data/data/com.android.chrome/app_chrome 2>/dev/null\n" +
-                    "chmod -R 755 /data/user/0/com.android.chrome/app_chrome 2>/dev/null\n" +
-                    "cp \"" + targetPath + "\" \"" + tempDb.getAbsolutePath() + "\" 2>/dev/null\n" +
-                    "chmod 666 \"" + tempDb.getAbsolutePath() + "\" 2>/dev/null\n" +
-                    "chmod -R 700 /data/data/com.android.chrome/app_chrome 2>/dev/null\n" +
-                    "chmod -R 700 /data/user/0/com.android.chrome/app_chrome 2>/dev/null\n" +
-                    "if [ \"$SE_STATE\" = \"Enforcing\" ]; then setenforce 1 2>/dev/null; fi\n" +
-                    "exit\n";
+                SQLiteDatabase db = null;
+                try {
+                    db = SQLiteDatabase.openDatabase(tempDb.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
+                    logs.append("✅ SQLiteDatabase otwarte pomyślnie w Javie.\n");
 
-                os.writeBytes(script);
-                os.flush();
+                    Cursor cursor = db.rawQuery("SELECT name, value, encrypted_value FROM cookies WHERE name LIKE '%PUDOJT%'", null);
+                    if (cursor != null) {
+                        int count = cursor.getCount();
+                        logs.append("📊 Liczba dopasowań %PUDOJT%: ").append(count).append("\n");
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-                String line;
-                while ((line = reader.readLine()) != null) logs.append("STDOUT: ").append(line).append("\n");
-                while ((line = errorReader.readLine()) != null) logs.append("STDERR: ").append(line).append("\n");
-                process.waitFor();
+                        while (cursor.moveToNext()) {
+                            String name = cursor.getString(0);
+                            String plainVal = cursor.getString(1);
+                            byte[] encBytes = cursor.getBlob(2);
 
-                if (tempDb.exists() && tempDb.length() > 0) {
-                    logs.append("✅ KOPIA PLIKU UDANA! Rozmiar bazy roboczej: ").append(tempDb.length()).append(" bajtów.\n");
+                            String val = (plainVal != null && !plainVal.isEmpty()) ? plainVal : decryptChromeAndroidBlob(encBytes, logs);
 
-                    SQLiteDatabase db = null;
-                    try {
-                        db = SQLiteDatabase.openDatabase(tempDb.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
-                        logs.append("✅ Otwarto bazę SQLiteDatabase w Java.\n");
-                        
-                        Cursor cursor = db.rawQuery("SELECT name, value, encrypted_value FROM cookies WHERE name LIKE '%PUDOJT%'", null);
-                        
-                        if (cursor != null) {
-                            int count = cursor.getCount();
-                            logs.append("📊 Wyników zapytania SQL (%PUDOJT%): ").append(count).append("\n");
-
-                            while (cursor.moveToNext()) {
-                                String name = cursor.getString(0);
-                                String plainVal = cursor.getString(1);
-                                byte[] encBytes = cursor.getBlob(2);
-
-                                String val = (plainVal != null && !plainVal.isEmpty()) ? plainVal : decryptChromeAndroidBlob(encBytes, logs);
-
-                                if (name.contains("__Secure-PUDOJTMD")) {
-                                    pudojtmd = val;
-                                    logs.append("🔑 Sukces: Wyciągnięto __Secure-PUDOJTMD (długość: ").append(val.length()).append(" znaków)\n");
-                                } else if (name.contains("__Secure-PUDOJT")) {
-                                    pudojt = val;
-                                    logs.append("🔑 Sukces: Wyciągnięto __Secure-PUDOJT (długość: ").append(val.length()).append(" znaków)\n");
-                                }
+                            if (name.contains("__Secure-PUDOJTMD")) {
+                                pudojtmd = val;
+                                logs.append("🔑 Sukces PUDOJTMD (długość: ").append(val.length()).append(")\n");
+                            } else if (name.contains("__Secure-PUDOJT")) {
+                                pudojt = val;
+                                logs.append("🔑 Sukces PUDOJT (długość: ").append(val.length()).append(")\n");
                             }
-                            cursor.close();
                         }
-                    } catch (Exception dbErr) {
-                        logs.append("❌ Błąd otwarcie bazy w Java: ").append(dbErr.getMessage()).append("\n");
-                    } finally {
-                        if (db != null && db.isOpen()) db.close();
+                        cursor.close();
                     }
-
-                    tempDb.delete();
-
-                    if (!pudojt.isEmpty()) {
-                        logs.append("🎉 Zakończono sukcesem z pliku: ").append(targetPath).append("\n");
-                        break;
-                    }
-                } else {
-                    logs.append("❌ Plik niedostępny pod tą ścieżką.\n");
+                } catch (Exception dbErr) {
+                    logs.append("❌ Błąd otwarcie SQLite w Java: ").append(dbErr.getMessage()).append("\n");
+                } finally {
+                    if (db != null && db.isOpen()) db.close();
                 }
+
+                tempDb.delete();
+            } else {
+                logs.append("❌ Nie udało się utworzyć pliku /data/local/tmp/ikw_chrome_cookies.db\n");
             }
 
             ret.put("logs", logs.toString());
@@ -149,12 +144,12 @@ public class KernelSuPlugin extends Plugin {
                 call.resolve(ret);
             } else {
                 ret.put("success", false);
-                ret.put("message", "Nie odnaleziono lub nie zdekodowano ciasteczek __Secure-PUDOJT.\nLogi:\n" + logs.toString());
+                ret.put("message", "Nie odnaleziono ciasteczek __Secure-PUDOJT.\nLogi:\n" + logs.toString());
                 call.resolve(ret);
             }
         } catch (Exception e) {
             ret.put("success", false);
-            ret.put("message", "Błąd wykonywania KernelSU: " + e.getMessage());
+            ret.put("message", "Błąd KernelSU: " + e.getMessage());
             call.resolve(ret);
         }
     }
@@ -162,7 +157,7 @@ public class KernelSuPlugin extends Plugin {
     private String decryptChromeAndroidBlob(byte[] encBytes, StringBuilder logs) {
         if (encBytes == null || encBytes.length < 3) return "";
         try {
-            logs.append("🔓 Rozpoczynam deszyfrowanie AES (bajtów enc: ").append(encBytes.length).append(")...\n");
+            logs.append("🔓 Deszyfrowanie AES (bajtów: ").append(encBytes.length).append(")...\n");
             byte[] rawPayload;
             if (encBytes[0] == 'v' && encBytes[1] == '1' && encBytes[2] == '0') {
                 rawPayload = Arrays.copyOfRange(encBytes, 3, encBytes.length);
@@ -188,20 +183,20 @@ public class KernelSuPlugin extends Plugin {
             Pattern jwtPattern = Pattern.compile("(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)");
             Matcher matcher = jwtPattern.matcher(decryptedText);
             if (matcher.find()) {
-                logs.append("🔓 Pomyślnie wyciągnięto JWT z deszyfrowanego ciągu.\n");
+                logs.append("🔓 Wyciągnięto JWT!\n");
                 return matcher.group(1);
             }
 
             Pattern jsonPattern = Pattern.compile("(\\{.*?\\})");
             Matcher jsonMatcher = jsonPattern.matcher(decryptedText);
             if (jsonMatcher.find()) {
-                logs.append("🔓 Pomyślnie wyciągnięto JSON z deszyfrowanego ciągu.\n");
+                logs.append("🔓 Wyciągnięto JSON metadata!\n");
                 return jsonMatcher.group(1);
             }
 
             return decryptedText.trim();
         } catch (Exception e) {
-            logs.append("❌ Błąd deszyfrowania AES: ").append(e.getMessage()).append("\n");
+            logs.append("❌ Błąd AES: ").append(e.getMessage()).append("\n");
             return "";
         }
     }
