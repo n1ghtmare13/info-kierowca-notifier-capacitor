@@ -97,9 +97,45 @@
     return null;
   }
 
+  const PWPW_REFRESH_URL = "https://info-kierowca.pl/bknd/auth/api/v1/jwt/refresh";
+
+  // --- Session JWT Refresher ---
+  async function doJwtRefresh() {
+    if (!session.pudojt) return;
+    try {
+      const cookieStr = `__Secure-PUDOJT=${session.pudojt}; __Secure-PUDOJTMD=${session.pudojtmd || ''}`;
+      const headers = {
+        'Cookie': cookieStr,
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Referer': 'https://info-kierowca.pl/reservation',
+        'Origin': 'https://info-kierowca.pl'
+      };
+
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) {
+        const res = await window.Capacitor.Plugins.CapacitorHttp.request({
+          method: 'GET',
+          url: PWPW_REFRESH_URL,
+          headers: headers
+        });
+        if (res.status === 204 || res.status === 200) {
+          addLog(`[REFRESH OK] Przedluzono sesje JWT (Status ${res.status})`);
+        } else if (res.status === 401 || res.status === 403 || res.status === 500) {
+          addLog(`[REFRESH EXPIRED] Sesja wygasla na serwerze PWPW (Status ${res.status})`);
+        }
+      } else {
+        const res = await fetch(PWPW_REFRESH_URL, { method: 'GET', headers: headers });
+        if (res.ok || res.status === 204) {
+          addLog(`[REFRESH OK] Przedluzono sesje JWT (Status ${res.status})`);
+        }
+      }
+    } catch (e) {
+      addLog(`[REFRESH ERROR] Blad odswiezania JWT: ${e.message}`);
+    }
+  }
+
   // --- KernelSU Root Cookie Extractor ---
   async function fetchCookiesViaKernelSu() {
-    addLog("Rozpoczynam przeszukiwanie baz Cookies w Androidzie (KernelSU)...");
+    addLog("Rozpoczynam przeszukiwanie baz Cookies w Androidzie (Root)...");
     const plugin = getKernelSuPlugin();
 
     if (plugin) {
@@ -110,34 +146,41 @@
           const pudojtPrev = res.pudojt.length > 25 ? res.pudojt.substring(0, 25) + '...' : res.pudojt;
           const pudojtmdPrev = (res.pudojtmd && res.pudojtmd.length > 25) ? res.pudojtmd.substring(0, 25) + '...' : res.pudojtmd;
           
-          addLog(`✅ Pomyślnie odczytano i aktywowano ciasteczka!\n__Secure-PUDOJT: ${pudojtPrev}\n__Secure-PUDOJTMD: ${pudojtmdPrev || '(brak)'}`);
-          if (res.logs) addLog("=== LOGI KERNELSU ===\n" + res.logs);
-          alert(`🎉 SUKCES! Pobrano sesję mObywatel z Chrome!\n\nPUDOJT: ${pudojtPrev}`);
+          addLog(`[OK] Pomyslnie odczytano i aktywowano ciasteczka!\n__Secure-PUDOJT: ${pudojtPrev}\n__Secure-PUDOJTMD: ${pudojtmdPrev || '(brak)'}`);
+          if (res.logs) addLog("=== LOGI ROOT ===\n" + res.logs);
+          alert(`SUKCES! Pobrano sesje mObywatel z Chrome!\n\nPUDOJT: ${pudojtPrev}`);
           runCheck();
         } else if (res && res.logs) {
           addLog("=== LOGI DIAGNOSTYCZNE ===\n" + res.logs);
           alert("ZRZUT DIAGNOSTYCZNY:\n\n" + res.logs);
         } else {
-          const msg = (res && res.message) ? res.message : 'Brak ciasteczek w Chrome';
-          addLog(`KernelSU Wynik: ${msg}`);
-          alert(`KernelSU Wynik:\n${msg}`);
+          const msg = (res && res.message) ? res.message : 'Brak ciasteczka w Chrome';
+          addLog(`Root Wynik: ${msg}`);
+          alert(`Root Wynik:\n${msg}`);
         }
       } catch (err) {
-        addLog(`KernelSU Błąd Wywołania: ${err.message}`);
-        alert("Błąd wywołania KernelSU: " + err.message);
+        addLog(`Root Blad Wywolania: ${err.message}`);
+        alert("Blad wywolania Root: " + err.message);
       }
     } else {
-      addLog("Środowisko: Uruchomiono w przeglądarce WWW (Brak wtyczki natywnej Androida).");
-      alert("Aplikacja otwarta w przeglądarce WWW. Zainstaluj plik .apk na zrootowanym telefonie z KernelSU.");
+      addLog("Srodowisko: Uruchomiono w przegladarce WWW (Brak wtyczki natywnej Androida).");
+      alert("Aplikacja otwarta w przegladarce WWW. Zainstaluj plik .apk na zrootowanym telefonie.");
     }
   }
 
   function openChromeBrowser() {
     const loginUrl = "https://info-kierowca.pl/login";
+    // Force opening Chrome package on Android if App/Browser plugin is available
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+      try {
+        window.Capacitor.Plugins.App.openUrl({ url: loginUrl });
+        return;
+      } catch(e){}
+    }
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
       window.Capacitor.Plugins.Browser.open({ url: loginUrl });
     } else {
-      window.open(loginUrl, '_blank');
+      window.open(loginUrl, '_system');
     }
   }
 
@@ -146,7 +189,7 @@
     if (isPaused) return;
 
     if (!session.pudojt) {
-      setUIState("error", "Wymagane logowanie mObywatel", "Zaloguj się w Chrome i kliknij 'Pobierz sesję z Chrome (KernelSU)'.");
+      setUIState("error", "Wymagane logowanie mObywatel", "Zaloguj się w Chrome i kliknij 'Pobierz sesję z Chrome (Root)'.");
       return;
     }
 
@@ -155,12 +198,15 @@
       return;
     }
 
+    // First attempt to refresh JWT token to keep session alive up to 60 mins
+    await doJwtRefresh();
+
     setUIState("scanning", "Sprawdzam...", getCentersSummary());
     nextCheckTimestamp = Date.now() + (Math.max(15, config.poll_interval_seconds) * 1000);
 
     try {
       const chunks = prepareChunks(config.organization_ids);
-      addLog(`▶ [REQ] Przygotowano ${chunks.length} paczek (po ${chunks[0] ? chunks[0].length : 0} ośrodków). Chunks: ${JSON.stringify(chunks)}`);
+      addLog(`[REQ] Przygotowano ${chunks.length} paczek (po ${chunks[0] ? chunks[0].length : 0} osrodkow). Chunks: ${JSON.stringify(chunks)}`);
       let allResults = [];
 
       for (let i = 0; i < chunks.length; i++) {
@@ -168,6 +214,9 @@
         if (Array.isArray(raw)) allResults = allResults.concat(raw);
         if (i < chunks.length - 1) await sleep(1200);
       }
+
+      // Log total raw slots found in response for diagnostic verification
+      logRawSlotsDiagnostic(allResults);
 
       const matchingHits = filterSlots(allResults);
 
@@ -177,19 +226,39 @@
         const dateStr = fmtDate(fastest.datetime);
 
         setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} (${fastest.exam_type}) · Miejsc: ${fastest.places}`);
-        addLog(`✅ HIT: ${dateStr} · ${fastest.word} (${fastest.exam_type})`);
+        addLog(`[HIT] ${dateStr} · ${fastest.word} (${fastest.exam_type})`);
 
         triggerAlerts(fastest);
       } else {
         currentHits = [];
         const limitInfo = config.current_slot_date ? ` przed ${config.current_slot_date}` : '';
         setUIState("scanning", "Sprawdzam...", `Brak wolnych terminów${limitInfo}`);
-        addLog(`ℹ Sprawdzono (${allResults.length} wyników z PWPW). Brak wolnych terminów pasujących do kryteriów.`);
+        addLog(`[INFO] Sprawdzono (${allResults.length} osrodkow z PWPW). Brak terminow pasujacych do filtrow (data/godziny).`);
       }
 
     } catch (err) {
       setUIState("error", "Błąd sesji / połączenia", err.message);
-      addLog(`❌ Błąd: ${err.message}`);
+      addLog(`[ERROR] ${err.message}`);
+    }
+  }
+
+  function logRawSlotsDiagnostic(rawResults) {
+    let summaryLines = [];
+    for (const word of rawResults) {
+      const wordName = word.wordName || getWordName(word.wordId || word.organizationId);
+      const exams = word.examCollectionForDay || [];
+      for (const exam of exams) {
+        const dtStr = exam.practiceDateTime || exam.theoryDateTime;
+        const places = exam.placePracticeAmount || exam.placeTheoryAmount || 0;
+        if (dtStr && places > 0) {
+          summaryLines.push(`${wordName} | ${exam.examType || 'Exam'} | ${dtStr} | Wolnych: ${places}`);
+        }
+      }
+    }
+    if (summaryLines.length > 0) {
+      addLog(`[RAW SLOTS] Odczytano łącznie ${summaryLines.length} surowych wolnych terminów z PWPW:\n` + summaryLines.slice(0, 15).join('\n') + (summaryLines.length > 15 ? `\n... oraz ${summaryLines.length - 15} wiecej` : ''));
+    } else {
+      addLog(`[RAW SLOTS] Serwer PWPW zwrócił 0 wolnych miejsc w żadnym z przesłanych ośrodków na najbliższe 30 dni.`);
     }
   }
 
@@ -222,7 +291,7 @@
     };
 
     const payloadLogStr = JSON.stringify(payload);
-    addLog(`📤 Wysyłam POST na PWPW:\nPayload: ${payloadLogStr}\nOrg IDs Count: ${orgChunk.length}`);
+    addLog(`[POST REQ] PWPW Payload: ${payloadLogStr}`);
 
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) {
       const res = await window.Capacitor.Plugins.CapacitorHttp.request({
@@ -234,10 +303,10 @@
       
       if (res.status !== 200) {
         const errDetail = typeof res.data === 'object' ? JSON.stringify(res.data) : (res.data || '');
-        addLog(`❌ PWPW Odpowiedź HTTP ${res.status}: ${errDetail}`);
+        addLog(`[HTTP ERROR] Status ${res.status}: ${errDetail}`);
         throw new Error(`HTTP ${res.status} - ${errDetail || 'Bad Request'}`);
       }
-      addLog(`📥 Otrzymano odpowiedź HTTP 200 (${Array.isArray(res.data) ? res.data.length + ' elementów' : 'obiekt'})`);
+      addLog(`[HTTP 200] PWPW Zwrocilo ${Array.isArray(res.data) ? res.data.length + ' ośrodków' : 'odpowiedź'}`);
       return res.data;
     } else {
       const res = await fetch(PWPW_SEARCH_URL, {
@@ -247,10 +316,10 @@
       });
       const textData = await res.text();
       if (!res.ok) {
-        addLog(`❌ PWPW Odpowiedź HTTP ${res.status}: ${textData}`);
+        addLog(`[HTTP ERROR] Status ${res.status}: ${textData}`);
         throw new Error(`HTTP ${res.status} - ${textData}`);
       }
-      addLog(`📥 Otrzymano odpowiedź HTTP 200.`);
+      addLog(`[HTTP 200] PWPW Zwrocilo odpowiedz.`);
       try { return JSON.parse(textData); } catch(e) { return []; }
     }
   }

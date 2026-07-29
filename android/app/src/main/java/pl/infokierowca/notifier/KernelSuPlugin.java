@@ -86,7 +86,7 @@ public class KernelSuPlugin extends Plugin {
             String pudojtmd = "";
 
             if (tempDb.exists() && tempDb.length() > 0) {
-                logs.append("✅ Plik bazy skopiowany do /data/local/tmp/ (rozmiar: ").append(tempDb.length()).append(" bajtów).\n");
+                logs.append("[OK] Plik bazy skopiowany do /data/local/tmp/ (rozmiar: ").append(tempDb.length()).append(" bajtow).\n");
 
                 SQLiteDatabase db = null;
                 try {
@@ -94,7 +94,7 @@ public class KernelSuPlugin extends Plugin {
                     Cursor cursor = db.rawQuery("SELECT name, value, encrypted_value FROM cookies WHERE name LIKE '%PUDOJT%'", null);
                     if (cursor != null) {
                         int count = cursor.getCount();
-                        logs.append("📊 Znalezione ciasteczka PUDOJT w bazie: ").append(count).append("\n");
+                        logs.append("[INFO] Znalezione ciasteczka PUDOJT w bazie: ").append(count).append("\n");
 
                         while (cursor.moveToNext()) {
                             String name = cursor.getString(0);
@@ -105,16 +105,16 @@ public class KernelSuPlugin extends Plugin {
 
                             if (name.contains("__Secure-PUDOJTMD")) {
                                 pudojtmd = val;
-                                logs.append("🔑 Pobrano __Secure-PUDOJTMD!\n");
+                                logs.append("[SUCCESS] Pobrano __Secure-PUDOJTMD!\n");
                             } else if (name.contains("__Secure-PUDOJT")) {
                                 pudojt = val;
-                                logs.append("🔑 Pobrano __Secure-PUDOJT!\n");
+                                logs.append("[SUCCESS] Pobrano __Secure-PUDOJT!\n");
                             }
                         }
                         cursor.close();
                     }
                 } catch (Exception dbErr) {
-                    logs.append("❌ Błąd otwarcie SQLite: ").append(dbErr.getMessage()).append("\n");
+                    logs.append("[ERROR] Blad otwarcia SQLite: ").append(dbErr.getMessage()).append("\n");
                 } finally {
                     if (db != null && db.isOpen()) db.close();
                 }
@@ -123,7 +123,7 @@ public class KernelSuPlugin extends Plugin {
                 new File("/data/local/tmp/ikw_chrome_cookies.db-wal").delete();
                 new File("/data/local/tmp/ikw_chrome_cookies.db-shm").delete();
             } else {
-                logs.append("❌ Nie udało się skopiować pliku bazy z Chrome.\n");
+                logs.append("[ERROR] Nie udalo sie skopiowac pliku bazy z Chrome.\n");
             }
 
             ret.put("logs", logs.toString());
@@ -140,7 +140,7 @@ public class KernelSuPlugin extends Plugin {
             }
         } catch (Exception e) {
             ret.put("success", false);
-            ret.put("message", "Błąd KernelSU: " + e.getMessage());
+            ret.put("message", "Blad Root: " + e.getMessage());
             call.resolve(ret);
         }
     }
@@ -179,7 +179,7 @@ public class KernelSuPlugin extends Plugin {
 
             return cleanAscii(decryptedText);
         } catch (Exception e) {
-            logs.append("❌ Błąd deszyfrowania AES: ").append(e.getMessage()).append("\n");
+            logs.append("[ERROR] Blad deszyfrowania AES: ").append(e.getMessage()).append("\n");
             return "";
         }
     }
