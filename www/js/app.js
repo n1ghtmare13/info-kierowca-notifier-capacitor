@@ -453,8 +453,14 @@
   }
 
   async function doPwpwRequest(orgChunk) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const startDateStr = `${year}-${month}-${day}`;
+
     const payload = {
-      startDate: new Date().toISOString().split('T')[0],
+      startDate: startDateStr,
       organizationId: orgChunk,
       category: getCategoryId(config.category),
       profileNumber: (config.profile_number || '').replace(/\s+/g, ''),
