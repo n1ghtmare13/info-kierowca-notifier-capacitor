@@ -239,15 +239,6 @@ legend {
   color: var(--text-sub);
 }
 
-.field-row {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.field-row .field {
-  flex: 1;
-}
-
 input[type="text"], input[type="number"], input[type="date"], select {
   width: 100%;
   min-height: 44px;
@@ -270,6 +261,81 @@ input:focus, select:focus {
   color: var(--text-muted);
   font-size: 0.8rem;
   margin-top: 0.3rem;
+}
+
+/* Custom Single-Track Dual Handle Range Slider */
+.dual-slider-container {
+  position: relative;
+  width: 100%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.dual-slider-track {
+  position: absolute;
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  background: #232730;
+  z-index: 1;
+}
+
+.dual-slider-container input[type="range"] {
+  position: absolute;
+  width: 100%;
+  height: 6px;
+  background: none;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  z-index: 2;
+}
+
+.dual-slider-container input[type="range"]::-webkit-slider-thumb {
+  height: 22px;
+  width: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #0e1015;
+  pointer-events: auto;
+  -webkit-appearance: none;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+.dual-slider-container input[type="range"]::-moz-range-thumb {
+  height: 22px;
+  width: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #0e1015;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+/* Single Frequency Range Slider */
+input[type="range"]#poll_interval_seconds {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #232730;
+  margin: 0.75rem 0;
+}
+
+input[type="range"]#poll_interval_seconds::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
 }
 
 /* Buttons */

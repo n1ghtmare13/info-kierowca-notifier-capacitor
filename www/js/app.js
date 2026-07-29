@@ -99,12 +99,11 @@
 
   // --- KernelSU Root Cookie Extractor ---
   async function fetchCookiesViaKernelSu() {
-    addLog("Rozpoczynam odczyt KernelSU...");
+    addLog("Rozpoczynam przeszukiwanie baz Cookies w Androidzie (KernelSU)...");
     const plugin = getKernelSuPlugin();
 
     if (plugin) {
       try {
-        addLog("Wywołuję komendę Root 'su' w Androidzie...");
         const res = await plugin.fetchChromeCookies();
         if (res && res.success && res.pudojt) {
           saveSession(res.pudojt, res.pudojtmd || '');
@@ -332,12 +331,14 @@
     $('current_slot_date').value = config.current_slot_date || '';
     $('earliest_hour').value = config.earliest_slot_hour || 7;
     $('latest_hour').value = config.latest_slot_hour || 20;
+    updateHoursLabel();
 
     $('auto_confirm_reschedule').checked = !!config.auto_confirm_reschedule;
     $('auto_select_slot').checked = !!config.auto_select_slot;
     $('auto_open_browser').checked = config.auto_open_browser !== false;
     $('wakelock_enabled').checked = config.wakelock_enabled !== false;
     $('poll_interval_seconds').value = config.poll_interval_seconds || 15;
+    $('poll-interval-label').textContent = `co ${config.poll_interval_seconds || 15}s`;
     $('ntfy_channel').value = config.ntfy_channel || '';
 
     // Buttons
@@ -359,6 +360,30 @@
       $('icon-pause').style.display = isPaused ? 'none' : 'block';
       $('icon-play').style.display = isPaused ? 'block' : 'none';
       updateStatusUI();
+    });
+
+    // Dual-thumb hour slider handlers (bidirectional control)
+    $('earliest_hour').addEventListener('input', () => {
+      let eVal = parseInt($('earliest_hour').value);
+      let lVal = parseInt($('latest_hour').value);
+      if (eVal >= lVal) {
+        $('earliest_hour').value = lVal - 1;
+      }
+      updateHoursLabel();
+    });
+
+    $('latest_hour').addEventListener('input', () => {
+      let eVal = parseInt($('earliest_hour').value);
+      let lVal = parseInt($('latest_hour').value);
+      if (lVal <= eVal) {
+        $('latest_hour').value = eVal + 1;
+      }
+      updateHoursLabel();
+    });
+
+    // Poll interval slider handler
+    $('poll_interval_seconds').addEventListener('input', (e) => {
+      $('poll-interval-label').textContent = `co ${e.target.value}s`;
     });
 
     // Exam Type Pills
@@ -413,6 +438,22 @@
     });
 
     setupWordSearch();
+  }
+
+  function updateHoursLabel() {
+    const e = parseInt($('earliest_hour').value) || 7;
+    const l = parseInt($('latest_hour').value) || 20;
+    const fmt = h => (h < 10 ? '0' : '') + h + ':00';
+    $('hours-range-label').textContent = `${fmt(e)} – ${fmt(l)}`;
+
+    // Update Track Highlight
+    const min = 6, max = 22;
+    const leftPct = ((e - min) / (max - min)) * 100;
+    const rightPct = 100 - (((l - min) / (max - min)) * 100);
+    const track = $('dual-track');
+    if (track) {
+      track.style.background = `linear-gradient(to right, #232730 ${leftPct}%, #4e8e66 ${leftPct}%, #4e8e66 ${100 - rightPct}%, #232730 ${100 - rightPct}%)`;
+    }
   }
 
   function setupWordSearch() {

@@ -21,24 +21,24 @@ public class KernelSuPlugin extends Plugin {
             Process process = Runtime.getRuntime().exec("su");
             DataOutputStream os = new DataOutputStream(process.getOutputStream());
             
-            // Shell commands:
-            // 1. Locate Chrome SQLite database (supports Chrome 120+ Network/Cookies, Default/Cookies, app_webview)
-            // 2. Copy to /data/local/tmp/ to bypass active Chrome file locks
-            // 3. Query sqlite3 for info-kierowca cookies
-            // 4. Remove temp file
+            // Comprehensive wildcard search for any Chromium/Chrome/WebView Cookies file in /data/data/ or /data/user/0/
             String script = 
-                "CPATH=$(ls /data/data/com.android.chrome/app_chrome/Default/Network/Cookies " +
-                "/data/data/com.android.chrome/app_chrome/Default/Cookies " +
-                "/data/data/com.android.chrome/app_webview/Default/Cookies " +
-                "/data/data/com.android.chrome/app_webview/Cookies 2>/dev/null | head -n 1)\n" +
-                "echo \"FOUND_PATH:$CPATH\"\n" +
-                "if [ -n \"$CPATH\" ]; then\n" +
-                "  cp \"$CPATH\" /data/local/tmp/temp_cookies.db 2>/dev/null\n" +
-                "  chmod 666 /data/local/tmp/temp_cookies.db 2>/dev/null\n" +
-                "  sqlite3 /data/local/tmp/temp_cookies.db \"SELECT name, value FROM cookies WHERE host_key LIKE '%info-kierowca.pl%';\" 2>/dev/null\n" +
-                "  rm -f /data/local/tmp/temp_cookies.db\n" +
-                "else\n" +
-                "  echo \"NO_CHROME_COOKIE_FILE_FOUND\"\n" +
+                "FOUND=0\n" +
+                "for f in $(find /data/data/ /data/user/0/ -name \"Cookies\" 2>/dev/null); do\n" +
+                "  echo \"TESTING_PATH:$f\"\n" +
+                "  cp \"$f\" /data/local/tmp/temp_check.db 2>/dev/null\n" +
+                "  chmod 666 /data/local/tmp/temp_check.db 2>/dev/null\n" +
+                "  RES=$(sqlite3 /data/local/tmp/temp_check.db \"SELECT name, value FROM cookies WHERE host_key LIKE '%info-kierowca.pl%';\" 2>/dev/null)\n" +
+                "  rm -f /data/local/tmp/temp_check.db\n" +
+                "  if [ -n \"$RES\" ]; then\n" +
+                "    echo \"MATCH_FOUND_IN:$f\"\n" +
+                "    echo \"$RES\"\n" +
+                "    FOUND=1\n" +
+                "    break\n" +
+                "  fi\n" +
+                "done\n" +
+                "if [ \"$FOUND\" -eq 0 ]; then\n" +
+                "  echo \"NO_MATCHING_COOKIES_FOUND_IN_ANY_BROWSER\"\n" +
                 "fi\n" +
                 "exit\n";
 
@@ -78,7 +78,7 @@ public class KernelSuPlugin extends Plugin {
                 call.resolve(ret);
             } else {
                 ret.put("success", false);
-                ret.put("message", "Nie odnaleziono wpisów __Secure-PUDOJT w bazie Chrome.\nSzczegóły logów:\n" + logs.toString());
+                ret.put("message", "Nie odnaleziono wpisów __Secure-PUDOJT w żadnym pliku Cookies na telefonie.\nLogi:\n" + logs.toString());
                 call.resolve(ret);
             }
         } catch (Exception e) {
