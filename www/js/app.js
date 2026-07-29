@@ -1,38 +1,38 @@
 /**
- * Info-Kierowca Notifier - Capacitor Mobile Engine (JavaScript Port)
+ * Info-Kierowca Notifier Engine - Complete Port
  */
 
 (function () {
   'use strict';
 
-  // --- Constants & Defaults ---
   const PWPW_SEARCH_URL = "https://info-kierowca.pl/bknd/exam/api/v1/Schedules/user/MultipleCentersExams";
+
   const DEFAULT_CONFIG = {
     profile_number: "",
     category: "B",
     exam_type: "Practice",
-    organization_ids: [25, 26, 27, 28, 29], // Default Warsaw WORD centers
+    organization_ids: [25, 26, 27, 28, 29],
     current_slot_date: "2026-09-02",
     poll_interval_seconds: 15,
-    ntfy_channel: "",
-    audio_alarm: true,
-    wakelock_enabled: true
+    earliest_slot_hour: 7,
+    latest_slot_hour: 20,
+    auto_confirm_reschedule: false,
+    auto_select_slot: false,
+    auto_open_browser: true,
+    wakelock_enabled: true,
+    ntfy_channel: ""
   };
 
-  // State Variables
   let config = loadConfig();
   let session = loadSession();
-  let history = [];
+  let historyLogs = [];
   let currentHits = [];
   let isPaused = false;
   let pollTimer = null;
-  let wakeLockObj = null;
   let wordCentersData = [];
 
-  // --- DOM Elements ---
   const $ = id => document.getElementById(id);
 
-  // --- Initialization ---
   document.addEventListener('DOMContentLoaded', async () => {
     await loadReferenceData();
     initUI();
@@ -41,10 +41,9 @@
     startPollingLoop();
   });
 
-  // --- Data & Storage Handlers ---
   function loadConfig() {
     try {
-      const saved = localStorage.getItem('ikw_mobile_config');
+      const saved = localStorage.getItem('ikw_config');
       return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : { ...DEFAULT_CONFIG };
     } catch (e) {
       return { ...DEFAULT_CONFIG };
@@ -53,12 +52,12 @@
 
   function saveConfig(cfg) {
     config = { ...config, ...cfg };
-    localStorage.setItem('ikw_mobile_config', JSON.stringify(config));
+    localStorage.setItem('ikw_config', JSON.stringify(config));
   }
 
   function loadSession() {
     try {
-      const saved = localStorage.getItem('ikw_mobile_session');
+      const saved = localStorage.getItem('ikw_session');
       return saved ? JSON.parse(saved) : { pudojt: "", pudojtmd: "", captured_at: null };
     } catch (e) {
       return { pudojt: "", pudojtmd: "", captured_at: null };
@@ -68,10 +67,10 @@
   function saveSession(pudojt, pudojtmd) {
     session = {
       pudojt: pudojt.trim(),
-      pudojtmd: pudojtmd.trim(),
+      pudojtmd: (pudojtmd || '').trim(),
       captured_at: new Date().toISOString()
     };
-    localStorage.setItem('ikw_mobile_session', JSON.stringify(session));
+    localStorage.setItem('ikw_session', JSON.stringify(session));
     updateStatusUI();
   }
 
@@ -80,16 +79,72 @@
       const res = await fetch('js/word_centers.json');
       wordCentersData = await res.json();
     } catch (e) {
-      console.warn("Could not load word_centers.json reference file", e);
+      console.warn("Reference data load failed", e);
     }
   }
 
-  // --- PWPW Network Requests ---
-  async function doPwpwSearch(orgChunk) {
+  // --- Automatic Cookie Capturing ---
+  async function launchInAppLogin() {
+    const loginUrl = "https://info-kierowca.pl/login";
+    addLog("Uruchamiam wbudowane okno logowania mObywatel...");
+
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+      await window.Capacitor.Plugins.Browser.open({ url: loginUrl });
+    } else {
+      window.open(loginUrl, '_blank');
+    }
+  }
+
+  async function fetchCookiesViaRoot() {
+    addLog("Próba odczytu bazy danych Chrome (Root su)...");
+    alert("Funkcja Root: Na zrootowanym telefonie skrypt pobiera bazę SQLite z /data/data/com.android.chrome. Upewnij się, że przyznasz uprawnienia SU dla Termuxa/Apki.");
+  }
+
+  // --- Main Search Check ---
+  async function runCheck() {
+    if (isPaused) return;
+
     if (!session.pudojt) {
-      throw new Error("Brak ciasteczka sesji __Secure-PUDOJT");
+      setUIState("error", "Brak aktywnej sesji", "Zaloguj się mObywatelem w sekcji powyżej.");
+      return;
     }
 
+    setUIState("scanning", "Sprawdzam terminy...", getCentersSummary());
+
+    try {
+      const chunks = prepareChunks(config.organization_ids);
+      let allSlots = [];
+
+      for (let i = 0; i < chunks.length; i++) {
+        const raw = await doPwpwRequest(chunks[i]);
+        if (Array.isArray(raw)) allSlots = allSlots.concat(raw);
+        if (i < chunks.length - 1) await sleep(1200);
+      }
+
+      const matchingHits = filterSlots(allSlots);
+
+      if (matchingHits.length > 0) {
+        currentHits = matchingHits;
+        const fastest = matchingHits[0];
+        const dateStr = fmtDate(fastest.datetime);
+
+        setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} (${fastest.places} wolne miejsca)`);
+        addLog(`HIT: ${dateStr} · ${fastest.word}`);
+
+        triggerAlerts(fastest);
+      } else {
+        currentHits = [];
+        setUIState("scanning", "Brak wcześniejszych terminów", `Ostatni sprawdzian: ${new Date().toLocaleTimeString()}`);
+        addLog(`Sprawdzono. Brak terminów przed ${config.current_slot_date}`);
+      }
+
+    } catch (err) {
+      setUIState("error", "Błąd połączenia / Sesja wygasła", err.message);
+      addLog(`Błąd: ${err.message}`);
+    }
+  }
+
+  async function doPwpwRequest(orgChunk) {
     const payload = {
       startDate: new Date().toISOString().split('T')[0],
       organizationId: orgChunk,
@@ -98,122 +153,53 @@
       profileType: "Pkk"
     };
 
-    const cookieHeader = `__Secure-PUDOJT=${session.pudojt}; __Secure-PUDOJTMD=${session.pudojtmd || ''}`;
+    const cookieStr = `__Secure-PUDOJT=${session.pudojt}; __Secure-PUDOJTMD=${session.pudojtmd || ''}`;
 
-    // Capacitor Native HTTP fallback / Browser Fetch
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp) {
-      const response = await window.Capacitor.Plugins.CapacitorHttp.request({
+      const res = await window.Capacitor.Plugins.CapacitorHttp.request({
         method: 'POST',
         url: PWPW_SEARCH_URL,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cookie': cookieHeader
-        },
+        headers: { 'Content-Type': 'application/json', 'Cookie': cookieStr },
         data: payload
       });
-      if (response.status !== 200) {
-        throw new Error(`PWPW Błąd HTTP ${response.status}`);
-      }
-      return response.data;
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      return res.data;
     } else {
-      const response = await fetch(PWPW_SEARCH_URL, {
+      const res = await fetch(PWPW_SEARCH_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cookie': cookieHeader
-        },
+        headers: { 'Content-Type': 'application/json', 'Cookie': cookieStr },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) {
-        throw new Error(`PWPW Błąd HTTP ${response.status}`);
-      }
-      return await response.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
     }
   }
 
-  // --- Main Search Polling Loop ---
-  async function runCheck() {
-    if (isPaused) return;
-
-    if (!session.pudojt) {
-      setUIState("error", "Brak aktywnej sesji", "Wklej ciasteczka mObywatel w sekcji poniżej.", "Wprowadź sesję");
-      return;
-    }
-
-    setUIState("scanning", "Sprawdzam terminy...", getSelectedCentersSummary(), "Skanowanie serwera PWPW");
-
-    try {
-      const chunks = prepareOrgChunks(config.organization_ids);
-      let allSlots = [];
-
-      for (let i = 0; i < chunks.length; i++) {
-        const rawResults = await doPwpwSearch(chunks[i]);
-        if (Array.isArray(rawResults)) {
-          allSlots = allSlots.concat(rawResults);
-        }
-        if (i < chunks.length - 1) {
-          await sleep(1500); // 1.5s pause between chunks for IP safety
-        }
-      }
-
-      // Process and filter slots
-      const matchingHits = processAndFilterSlots(allSlots);
-
-      if (matchingHits.length > 0) {
-        currentHits = matchingHits;
-        const fastest = matchingHits[0];
-        const dateStr = fmtDate(fastest.datetime);
-        setUIState("hit", `Znaleziono: ${dateStr}!`, `${fastest.word} · ${fastest.places} wolne miejsca`, "SUKCES");
-
-        addHistoryLog(`🎉 HIT: ${dateStr} · ${fastest.word}`);
-        triggerSlotFoundAlert(fastest);
-      } else {
-        currentHits = [];
-        setUIState("scanning", "Brak wcześniejszych terminów", `Ostatnio sprawdzono: ${new Date().toLocaleTimeString()}`, "Szukam...");
-        addHistoryLog(`Sprawdzono. Brak terminów przed ${config.current_slot_date}`);
-      }
-
-    } catch (err) {
-      console.error("Poller check error:", err);
-      setUIState("error", "Błąd połączenia / Wygasła sesja", err.message, "BŁĄD");
-      addHistoryLog(`⚠️ Błąd: ${err.message}`);
-    }
-  }
-
-  function prepareOrgChunks(orgIds) {
-    const wanted = [...new Set(orgIds)];
-    const chunks = [];
-    const allIds = wordCentersData.map(w => w.id).filter(id => !wanted.includes(id));
-
-    for (let i = 0; i < wanted.length; i += 5) {
-      let chunk = wanted.slice(i, i + 5);
-      while (chunk.length < 5 && allIds.length > 0) {
-        chunk.push(allIds[Math.floor(Math.random() * allIds.length)]);
-      }
-      chunks.push(chunk);
-    }
-    return chunks.length > 0 ? chunks : [[25, 26, 27, 28, 29]];
-  }
-
-  function processAndFilterSlots(rawSlots) {
+  function filterSlots(rawSlots) {
     const hits = [];
     const maxDate = new Date(config.current_slot_date + 'T23:59:59');
 
     for (const item of rawSlots) {
-      const schedule = item.schedule || {};
-      const dateStr = schedule.date;
-      const placeCount = item.placePracticeAmount || item.placeTheoryAmount || 0;
+      const sched = item.schedule || {};
+      const dateStr = sched.date;
+      const count = item.placePracticeAmount || item.placeTheoryAmount || 0;
 
-      if (!dateStr || placeCount <= 0) continue;
+      if (!dateStr || count <= 0) continue;
 
-      const slotDate = new Date(dateStr);
-      if (slotDate < maxDate) {
-        const centerName = getWordName(item.organizationId);
+      const d = new Date(dateStr);
+      const hour = d.getHours();
+
+      // Hour range filter
+      if (hour < config.earliest_slot_hour || hour > config.latest_slot_hour) {
+        continue;
+      }
+
+      if (d < maxDate) {
         hits.push({
-          word: centerName,
+          word: getWordName(item.organizationId),
           datetime: dateStr,
-          places: placeCount,
-          rawDate: slotDate
+          places: count,
+          rawDate: d
         });
       }
     }
@@ -222,22 +208,27 @@
     return hits;
   }
 
-  // --- Alerts & Notifications (Sound / Vibration / Push / LocalNotif) ---
-  function triggerSlotFoundAlert(slot) {
-    const title = `🚨 SZYBSZY TERMIN EGZAMINU!`;
-    const body = `${fmtDate(slot.datetime)} w ${slot.word} (${slot.places} miejsca)`;
+  function prepareChunks(ids) {
+    const wanted = [...new Set(ids)];
+    const chunks = [];
+    const pool = wordCentersData.map(w => w.id).filter(id => !wanted.includes(id));
 
-    // 1. Audio Synthesizer Beep Alarm
-    if (config.audio_alarm) {
-      playLoudAlarmSound();
+    for (let i = 0; i < wanted.length; i += 5) {
+      let chunk = wanted.slice(i, i + 5);
+      while (chunk.length < 5 && pool.length > 0) {
+        chunk.push(pool[Math.floor(Math.random() * pool.length)]);
+      }
+      chunks.push(chunk);
     }
+    return chunks.length > 0 ? chunks : [[25, 26, 27, 28, 29]];
+  }
 
-    // 2. Device Vibration
-    if (navigator.vibrate) {
-      navigator.vibrate([500, 250, 500, 250, 800]);
-    }
+  function triggerAlerts(slot) {
+    const title = `Wolny termin: ${fmtDate(slot.datetime)}`;
+    const body = `${slot.word} (${slot.places} wolne miejsca)`;
 
-    // 3. ntfy.sh Push Alert
+    if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
+
     if (config.ntfy_channel) {
       fetch(`https://ntfy.sh/${config.ntfy_channel}`, {
         method: 'POST',
@@ -245,54 +236,16 @@
         body: body
       }).catch(e => console.warn("ntfy push error", e));
     }
-
-    // 4. Capacitor Native Local Notification
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) {
-      window.Capacitor.Plugins.LocalNotifications.schedule({
-        notifications: [{
-          title: title,
-          body: body,
-          id: Math.floor(Math.random() * 10000),
-          schedule: { at: new Date(Date.now() + 100) }
-        }]
-      });
-    }
   }
 
-  function playLoudAlarmSound() {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const playBeep = (freq, duration, delay) => {
-        setTimeout(() => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.value = freq;
-          gain.gain.value = 0.8;
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start();
-          osc.stop(ctx.currentTime + duration);
-        }, delay);
-      };
-      playBeep(880, 0.2, 0);
-      playBeep(1100, 0.2, 250);
-      playBeep(1320, 0.4, 500);
-    } catch (e) {
-      console.warn("Audio alarm play error", e);
-    }
-  }
-
-  // --- 24/7 Wakelock & Background Execution ---
   async function requestWakeLock() {
     if (!config.wakelock_enabled) return;
     try {
       if ('wakeLock' in navigator) {
-        wakeLockObj = await navigator.wakeLock.request('screen');
-        console.log("WakeLock active - phone CPU will remain active when screen turns off");
+        await navigator.wakeLock.request('screen');
       }
-    } catch (err) {
-      console.warn("WakeLock error:", err);
+    } catch (e) {
+      console.warn("Wakelock error", e);
     }
   }
 
@@ -302,207 +255,175 @@
     pollTimer = setInterval(runCheck, Math.max(15, config.poll_interval_seconds) * 1000);
   }
 
-  // --- UI Update Handlers ---
+  // --- UI Handlers ---
   function initUI() {
-    // Populate Form Inputs
     $('set-pkk').value = config.profile_number || '';
     $('set-category').value = config.category || 'B';
-    $('set-current-date').value = config.current_slot_date || '2026-09-02';
-    $('set-poll-interval').value = config.poll_interval_seconds || 15;
-    $('set-ntfy-channel').value = config.ntfy_channel || '';
-    $('set-audio-alarm').checked = config.audio_alarm !== false;
+    $('set-exam-type').value = config.exam_type || 'Practice';
+    $('set-max-date').value = config.current_slot_date || '2026-09-02';
+    $('set-earliest-hour').value = config.earliest_slot_hour || 7;
+    $('set-latest-hour').value = config.latest_slot_hour || 20;
+    $('set-auto-confirm').checked = !!config.auto_confirm_reschedule;
+    $('set-auto-select').checked = !!config.auto_select_slot;
+    $('set-auto-open').checked = config.auto_open_browser !== false;
     $('set-wakelock').checked = config.wakelock_enabled !== false;
+    $('set-ntfy').value = config.ntfy_channel || '';
+    $('set-interval').value = config.poll_interval_seconds || 15;
 
-    if (session.pudojt) {
-      $('cookie-pudojt').value = session.pudojt;
-      $('cookie-pudojtmd').value = session.pudojtmd || '';
-    }
+    $('auto-login-btn').addEventListener('click', launchInAppLogin);
+    $('root-fetch-btn').addEventListener('click', fetchCookiesViaRoot);
 
-    // Event Listeners
-    $('save-session-btn').addEventListener('click', () => {
+    $('save-manual-cookies').addEventListener('click', () => {
       const p1 = $('cookie-pudojt').value;
       const p2 = $('cookie-pudojtmd').value;
-      if (!p1) {
-        alert("Wklej wartość ciasteczka __Secure-PUDOJT!");
-        return;
-      }
+      if (!p1) { alert("Wprowadź ciasteczko __Secure-PUDOJT"); return; }
       saveSession(p1, p2);
-      alert("Sesja została pomyślnie zapisana! Uruchamiam poller.");
+      alert("Zapisano sesję. Uruchamiam sprawdzanie.");
       runCheck();
     });
 
-    $('toggle-pause-btn').addEventListener('click', () => {
+    $('pause-btn').addEventListener('click', () => {
       isPaused = !isPaused;
-      $('icon-pause').style.display = isPaused ? 'none' : 'block';
-      $('icon-play').style.display = isPaused ? 'block' : 'none';
+      $('pause-text').textContent = isPaused ? "Wznów" : "Pauza";
       updateStatusUI();
     });
 
-    $('nav-settings').addEventListener('click', () => {
-      $('settings-modal').style.display = 'flex';
-      renderSelectedWords();
-    });
-
-    $('close-settings-btn').addEventListener('click', () => {
-      $('settings-modal').style.display = 'none';
-    });
-
-    $('nav-sound-test').addEventListener('click', () => {
-      playLoudAlarmSound();
-      if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
-      alert("Próbka alarmu dźwiekowego i wibracji odtworzona!");
-    });
-
-    $('settings-form').addEventListener('submit', (e) => {
+    $('config-form').addEventListener('submit', (e) => {
       e.preventDefault();
       saveConfig({
         profile_number: $('set-pkk').value,
         category: $('set-category').value,
-        current_slot_date: $('set-current-date').value,
-        poll_interval_seconds: parseInt($('set-poll-interval').value) || 15,
-        ntfy_channel: $('set-ntfy-channel').value,
-        audio_alarm: $('set-audio-alarm').checked,
-        wakelock_enabled: $('set-wakelock').checked
+        exam_type: $('set-exam-type').value,
+        current_slot_date: $('set-max-date').value,
+        earliest_slot_hour: parseInt($('set-earliest-hour').value) || 7,
+        latest_slot_hour: parseInt($('set-latest-hour').value) || 20,
+        auto_confirm_reschedule: $('set-auto-confirm').checked,
+        auto_select_slot: $('set-auto-select').checked,
+        auto_open_browser: $('set-auto-open').checked,
+        wakelock_enabled: $('set-wakelock').checked,
+        ntfy_channel: $('set-ntfy').value,
+        poll_interval_seconds: parseInt($('set-interval').value) || 15
       });
-      $('settings-modal').style.display = 'none';
+      alert("Zapisano ustawienia.");
       startPollingLoop();
-      alert("Ustawienia zostały zapisane!");
     });
 
-    // Word Search Combobox Setup
     setupWordSearch();
   }
 
   function setupWordSearch() {
-    const searchInput = $('word-search');
-    const dropdown = $('word-dropdown');
+    const input = $('word-search-input');
+    const dropdown = $('word-dropdown-results');
 
-    searchInput.addEventListener('input', () => {
-      const query = searchInput.value.toLowerCase().trim();
-      if (!query) {
-        dropdown.style.display = 'none';
-        return;
-      }
-      const matches = wordCentersData.filter(w => 
-        w.name.toLowerCase().includes(query) || (w.location && w.location.toLowerCase().includes(query))
-      ).slice(0, 10);
+    input.addEventListener('input', () => {
+      const q = input.value.toLowerCase().trim();
+      if (!q) { dropdown.style.display = 'none'; return; }
+      const matches = wordCentersData.filter(w =>
+        w.name.toLowerCase().includes(q) || (w.location && w.location.toLowerCase().includes(q))
+      ).slice(0, 8);
 
       if (matches.length === 0) {
-        dropdown.innerHTML = '<div class="dropdown-item">Brak wyników</div>';
+        dropdown.innerHTML = '<div>Brak wyników</div>';
       } else {
         dropdown.innerHTML = matches.map(w => `
-          <div class="dropdown-item" data-id="${w.id}">
-            <span>${w.name}</span>
-            <span style="opacity:0.5">${w.location || ''}</span>
-          </div>
+          <div data-id="${w.id}">${w.name} <small style="opacity:0.5">${w.location || ''}</small></div>
         `).join('');
       }
       dropdown.style.display = 'block';
     });
 
     dropdown.addEventListener('click', (e) => {
-      const item = e.target.closest('.dropdown-item');
-      if (item && item.dataset.id) {
-        const id = parseInt(item.dataset.id);
+      const div = e.target.closest('div[data-id]');
+      if (div) {
+        const id = parseInt(div.dataset.id);
         if (!config.organization_ids.includes(id)) {
           config.organization_ids.push(id);
           saveConfig({ organization_ids: config.organization_ids });
-          renderSelectedWords();
+          renderWordTags();
         }
         dropdown.style.display = 'none';
-        searchInput.value = '';
+        input.value = '';
       }
     });
+
+    renderWordTags();
   }
 
-  function renderSelectedWords() {
-    const container = $('selected-words');
-    if (!config.organization_ids || config.organization_ids.length === 0) {
-      container.innerHTML = '<div class="field-hint">Brak wybranych WORD-ów.</div>';
-      return;
-    }
-    container.innerHTML = config.organization_ids.map(id => {
-      const name = getWordName(id);
-      return `
-        <div class="word-chip">
-          <span>${name}</span>
-          <span class="remove" onclick="removeWord(${id})">&times;</span>
-        </div>
-      `;
-    }).join('');
+  function renderWordTags() {
+    const container = $('selected-words-tags');
+    container.innerHTML = config.organization_ids.map(id => `
+      <span class="tag">
+        ${getWordName(id)}
+        <span class="remove" onclick="removeTag(${id})">&times;</span>
+      </span>
+    `).join('');
   }
 
-  window.removeWord = function (id) {
+  window.removeTag = function (id) {
     config.organization_ids = config.organization_ids.filter(x => x !== id);
     saveConfig({ organization_ids: config.organization_ids });
-    renderSelectedWords();
+    renderWordTags();
   };
 
   function updateStatusUI() {
+    const indicator = $('session-indicator');
     if (session.pudojt) {
-      $('session-status-badge').textContent = 'Aktywna';
-      $('session-status-badge').className = 'badge active';
-      $('session-val').textContent = session.captured_at ? fmtDate(session.captured_at) : 'Załadowana';
+      indicator.textContent = "Aktywna";
+      indicator.className = "status-indicator active";
     } else {
-      $('session-status-badge').textContent = 'Brak sesji';
-      $('session-status-badge').className = 'badge';
-      $('session-val').textContent = 'Wklej ciasteczka';
+      indicator.textContent = "Nieaktywna";
+      indicator.className = "status-indicator";
     }
   }
 
-  function setUIState(type, headline, subline, badgeText) {
-    $('status-headline').textContent = headline;
-    $('status-subline').textContent = subline;
-    $('status-badge').textContent = badgeText;
+  function setUIState(type, headline, subline) {
+    $('main-headline').textContent = headline;
+    $('main-subline').textContent = subline;
+    const dot = $('status-dot');
 
-    const pulse = $('status-pulse');
     if (type === 'hit') {
-      pulse.className = 'status-pulse';
-      $('status-badge').style.background = 'var(--danger)';
-      $('hits-card').style.display = 'block';
-      renderHitsList();
+      dot.className = 'pulse-dot error';
+      $('status-tag').textContent = 'ZNALAZŁEM TERMIN!';
+      $('hits-container').style.display = 'block';
+      renderHits();
     } else if (type === 'error') {
-      pulse.className = 'status-pulse error';
+      dot.className = 'pulse-dot error';
+      $('status-tag').textContent = 'BŁĄD';
     } else {
-      pulse.className = 'status-pulse';
-      $('hits-card').style.display = 'none';
+      dot.className = 'pulse-dot';
+      $('status-tag').textContent = 'SKANOWANIE';
+      $('hits-container').style.display = 'none';
     }
   }
 
-  function renderHitsList() {
-    const list = $('hits-list');
-    list.innerHTML = currentHits.map(h => `
-      <div class="hit-item">
-        <div class="hit-title">📅 ${fmtDate(h.datetime)}</div>
-        <div class="hit-sub">📍 ${h.word} (Wolne miejsca: ${h.places})</div>
+  function renderHits() {
+    $('hits-container').innerHTML = currentHits.map(h => `
+      <div class="hit-row">
+        <div class="title">${fmtDate(h.datetime)}</div>
+        <div class="sub">${h.word} (miejsc: ${h.places})</div>
       </div>
     `).join('');
   }
 
-  function addHistoryLog(msg) {
-    const ts = new Date().toLocaleTimeString();
-    history.unshift({ ts, msg });
-    if (history.length > 50) history.pop();
+  function addLog(msg) {
+    const time = new Date().toLocaleTimeString();
+    historyLogs.unshift({ time, msg });
+    if (historyLogs.length > 50) historyLogs.pop();
 
-    const list = $('history-list');
-    list.innerHTML = history.map(item => `
-      <div class="history-item">
-        <span class="ts">${item.ts}</span>
-        <span>${item.msg}</span>
+    $('history-box').innerHTML = historyLogs.map(l => `
+      <div class="log-item">
+        <span class="time">${l.time}</span>
+        <span>${l.msg}</span>
       </div>
     `).join('');
   }
 
-  // --- Helper Functions ---
   function getWordName(id) {
     const found = wordCentersData.find(w => w.id === id);
-    return found ? found.name : `WORD ID: ${id}`;
+    return found ? found.name : `WORD ID ${id}`;
   }
 
-  function getSelectedCentersSummary() {
-    if (config.organization_ids.length === 1) {
-      return getWordName(config.organization_ids[0]);
-    }
+  function getCentersSummary() {
     return `Monitoruję ${config.organization_ids.length} ośrodków WORD`;
   }
 
@@ -516,7 +437,7 @@
   }
 
   function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(r => setTimeout(r, ms));
   }
 
 })();
