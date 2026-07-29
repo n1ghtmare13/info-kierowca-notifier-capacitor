@@ -18,8 +18,10 @@ import java.util.Arrays;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKeyFactory;
@@ -29,6 +31,42 @@ import javax.crypto.spec.SecretKeySpec;
 
 @CapacitorPlugin(name = "KernelSu")
 public class KernelSuPlugin extends Plugin {
+
+    @PluginMethod
+    public void startForegroundService(PluginCall call) {
+        JSObject ret = new JSObject();
+        try {
+            Context ctx = getContext();
+            Intent serviceIntent = new Intent(ctx, NotifierForegroundService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ctx.startForegroundService(serviceIntent);
+            } else {
+                ctx.startService(serviceIntent);
+            }
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            ret.put("success", false);
+            ret.put("message", "Blad uruchomienia uslugi w tle: " + e.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    @PluginMethod
+    public void stopForegroundService(PluginCall call) {
+        JSObject ret = new JSObject();
+        try {
+            Context ctx = getContext();
+            Intent serviceIntent = new Intent(ctx, NotifierForegroundService.class);
+            ctx.stopService(serviceIntent);
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            ret.put("success", false);
+            ret.put("message", e.getMessage());
+            call.resolve(ret);
+        }
+    }
 
     @PluginMethod
     public void openGoogleChrome(PluginCall call) {

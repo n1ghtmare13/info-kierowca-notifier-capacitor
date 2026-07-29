@@ -40,6 +40,7 @@
     initUI();
     updateStatusUI();
     requestWakeLock();
+    startForegroundService();
     startPollingLoop();
     startCountdownLoop();
 
@@ -58,6 +59,20 @@
       });
     }
   });
+
+  async function startForegroundService() {
+    const plugin = getKernelSuPlugin();
+    if (plugin && typeof plugin.startForegroundService === 'function') {
+      try {
+        const res = await plugin.startForegroundService();
+        if (res && res.success) {
+          addLog("[FOREGROUND SERVICE] Uruchomiono serwis w tle (WakeLock + Ongoing Notification). Internet i proces nie beda odlaczane przy zablokowanym ekranie.");
+        }
+      } catch (e) {
+        console.warn("startForegroundService failed", e);
+      }
+    }
+  }
 
   function loadConfig() {
     try {
