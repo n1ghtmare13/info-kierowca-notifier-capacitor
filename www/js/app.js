@@ -198,8 +198,8 @@
     }
   }
 
-  async function openChromeBrowser() {
-    const loginUrl = "https://info-kierowca.pl/login";
+  async function openChromeBrowser(targetUrl) {
+    const loginUrl = targetUrl || "https://info-kierowca.pl/login";
     const plugin = getKernelSuPlugin();
     if (plugin && typeof plugin.openGoogleChrome === 'function') {
       try {
@@ -261,6 +261,11 @@
         addLog(`[HIT] ${dateStr} · ${fastest.word} (${fastest.exam_type})`);
 
         triggerAlerts(fastest);
+
+        if (config.auto_open_browser !== false) {
+          addLog("[AUTO OPEN] Znaleziono wolny termin! Otwieram stronę rezerwacji w Google Chrome...");
+          openChromeBrowser('https://info-kierowca.pl/reservation');
+        }
       } else {
         currentHits = [];
         const limitInfo = config.current_slot_date ? ` przed ${config.current_slot_date}` : '';
@@ -772,9 +777,10 @@
 
   function renderHits() {
     $('hits-container').innerHTML = currentHits.map(h => `
-      <div class="hit-item">
+      <div class="hit-item" style="cursor:pointer;" onclick="openChromeBrowser('https://info-kierowca.pl/reservation')">
         <div class="hi-title">${fmtDate(h.datetime)}</div>
-        <div class="hi-sub">${h.word} (miejsc: ${h.places})</div>
+        <div class="hi-sub">${h.word} (${h.exam_type}) · Wolnych miejsc: ${h.places}</div>
+        <div style="margin-top:6px; font-size:12px; color:#4e8e66; font-weight:600;">Przejdz do rezerwacji w Chrome ➔</div>
       </div>
     `).join('');
   }
