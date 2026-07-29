@@ -33,6 +33,29 @@ import javax.crypto.spec.SecretKeySpec;
 public class KernelSuPlugin extends Plugin {
 
     @PluginMethod
+    public void enableChromeCdpRoot(PluginCall call) {
+        JSObject ret = new JSObject();
+        try {
+            String script = 
+                "setenforce 0 2>/dev/null\n" +
+                "echo \"chrome --remote-debugging-port=9222\" > /data/local/tmp/chrome-command-line\n" +
+                "chmod 755 /data/local/tmp/chrome-command-line\n" +
+                "exit\n";
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-mm"});
+            DataOutputStream os = new DataOutputStream(p.getOutputStream());
+            os.writeBytes(script);
+            os.flush();
+            p.waitFor();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            ret.put("success", false);
+            ret.put("message", e.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    @PluginMethod
     public void startForegroundService(PluginCall call) {
         JSObject ret = new JSObject();
         try {

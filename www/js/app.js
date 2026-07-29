@@ -201,10 +201,15 @@
   async function openChromeBrowser(targetUrl) {
     const loginUrl = targetUrl || "https://info-kierowca.pl/login";
     const plugin = getKernelSuPlugin();
-    if (plugin && typeof plugin.openGoogleChrome === 'function') {
+    if (plugin) {
       try {
-        const res = await plugin.openGoogleChrome({ url: loginUrl });
-        if (res && res.success) return;
+        if (typeof plugin.enableChromeCdpRoot === 'function') {
+          await plugin.enableChromeCdpRoot();
+        }
+        if (typeof plugin.openGoogleChrome === 'function') {
+          const res = await plugin.openGoogleChrome({ url: loginUrl });
+          if (res && res.success) return;
+        }
       } catch (e) {
         console.warn("openGoogleChrome failed, using fallback", e);
       }
