@@ -468,12 +468,31 @@
     return chunks;
   }
 
-  function triggerAlerts(slot) {
+  async function triggerAlerts(slot) {
     const title = `Wolny termin: ${fmtDate(slot.datetime)}`;
-    const body = `${slot.word} (Wolne miejsca: ${slot.places})`;
+    const body = `${slot.word} (${slot.exam_type}) - Miejsc: ${slot.places}`;
 
     if (navigator.vibrate) navigator.vibrate([500, 250, 500, 250, 500]);
 
+    // Send Native Android System Notification
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) {
+      try {
+        await window.Capacitor.Plugins.LocalNotifications.schedule({
+          notifications: [
+            {
+              title: title,
+              body: body,
+              id: 1,
+              schedule: { at: new Date(Date.now() + 100) }
+            }
+          ]
+        });
+      } catch (e) {
+        console.warn("Local notification error", e);
+      }
+    }
+
+    // Send Remote Push via ntfy.sh if channel configured
     if (config.ntfy_channel) {
       fetch(`https://ntfy.sh/${config.ntfy_channel}`, {
         method: 'POST',
