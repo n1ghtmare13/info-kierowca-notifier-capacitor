@@ -257,6 +257,9 @@
 
       const matchingHits = filterSlots(allResults);
 
+      // Deduplicate history entries identical to Python's notifier.py (last_signature tracking)
+      updateHistorySignature(matchingHits);
+
       if (matchingHits.length > 0) {
         currentHits = matchingHits;
         const fastest = matchingHits[0];
@@ -276,7 +279,6 @@
         currentHits = [];
         const limitInfo = config.current_slot_date ? ` przed ${config.current_slot_date}` : '';
         setUIState("scanning", "Sprawdzam...", `Brak wolnych terminów${limitInfo}`);
-        addLog(`[INFO] Sprawdzono (${allResults.length} osrodkow z PWPW). Brak terminow pasujacych do filtrow (data/godziny).`);
       }
 
     } catch (err) {
@@ -931,6 +933,48 @@
       return "Brak wybranych ośrodków WORD";
     }
     return `Monitoruję ${config.organization_ids.length} ośrodków WORD`;
+  }
+
+  let lastSignature = undefined;
+
+  function shortWord(name) {
+    if (!name) return '';
+    const prefix = "WORD Warszawa M/E ";
+    return name.startsWith(prefix) ? name.substring(prefix.length) : name;
+  }
+
+  function fmtTimestamp(d) {
+    const dt = d instanceof Date ? d : new Date(d);
+    return dt.toLocaleString('pl-PL', {
+      weekday: 'short', day: '2-digit', month: 'short',
+      year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+  }
+
+  function fmtSlotDateShort(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleString('pl-PL', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+    });
+  }
+
+  function updateHistorySignature(hits) {
+    const fastest = (hits && hits.length > 0) ? hits[0] : null;
+    let signature = "";
+    if (fastest) {
+      const dtStr = fmtSlotDateShort(fastest.datetime);
+      const wName = shortWord(fastest.word);
+      signature = `${dtStr} · ${wName} (${fastest.places})`;
+    } else {
+      signature = "no slots in the next 31 days";
+    }
+
+    if (signature !== lastSignature) {
+      lastSignature = signature;
+      const ts = fmtTimestamp(new Date());
+      addLog(`${ts} — ${signature}`);
+    }
   }
 
   function fmtDate(iso) {
