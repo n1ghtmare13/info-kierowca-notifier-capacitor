@@ -208,7 +208,12 @@
         }
         if (typeof plugin.openGoogleChrome === 'function') {
           const res = await plugin.openGoogleChrome({ url: loginUrl });
-          if (res && res.success) return;
+          if (res && res.success) {
+            if (loginUrl.includes("/login")) {
+              runCdpAutoLogin();
+            }
+            return;
+          }
         }
       } catch (e) {
         console.warn("openGoogleChrome failed, using fallback", e);
@@ -218,6 +223,100 @@
       window.Capacitor.Plugins.Browser.open({ url: loginUrl });
     } else {
       window.open(loginUrl, '_blank');
+    }
+  }
+
+  async function runCdpAutoLogin() {
+    addLog("[CDP LOGIN] Rozpoczynam automatyczną nawigację do kodu QR mObywatel (Zaloguj się -> gov.pl -> mObywatel)...");
+    await sleep(2500);
+
+    try {
+      const listRes = await fetch("http://127.0.0.1:9222/json/list");
+      const tabs = await listRes.json();
+      const targetTab = tabs.find(t => t.url && (t.url.includes("info-kierowca.pl") || t.url.includes("login.gov.pl") || t.url.includes("pwpw"))) || tabs[0];
+
+      if (!targetTab || !targetTab.webSocketDebuggerUrl) return;
+
+      const ws = new WebSocket(targetTab.webSocketDebuggerUrl);
+
+      ws.onopen = async () => {
+        let msgId = 1;
+        const evalJs = (jsCode) => new Promise((resolve) => {
+          const id = msgId++;
+          const handler = (evt) => {
+            try {
+              const data = JSON.parse(evt.data);
+              if (data.id === id) {
+                ws.removeEventListener('message', handler);
+                resolve(data.result ? data.result.value : null);
+              }
+            } catch (e) { resolve(null); }
+          };
+          ws.addEventListener('message', handler);
+          ws.send(JSON.stringify({
+            id: id,
+            method: "Runtime.evaluate",
+            params: { expression: jsCode, returnByValue: true }
+          }));
+        });
+
+        const autoClickTargetsJs = `
+          (function() {
+            var targets = ["Aplikacja mObywatel", "gov.pl", "Zaloguj się"];
+            function isVisible(el) {
+              var style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+              return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
+            }
+            function isClickable(el) {
+              if (!el) return false;
+              var style = window.getComputedStyle(el);
+              return el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button' || style.cursor === 'pointer';
+            }
+            function clickableAncestor(el) {
+              var cur = el;
+              for (var i = 0; i < 6 && cur; i++) {
+                if (isClickable(cur)) return cur;
+                cur = cur.parentElement;
+              }
+              return el;
+            }
+            var all = document.querySelectorAll('button, a, [role="button"], li, div, span');
+            for (var ti = 0; ti < targets.length; ti++) {
+              var text = targets[ti];
+              var best = null;
+              for (var i = 0; i < all.length; i++) {
+                var el = all[i];
+                if (!isVisible(el)) continue;
+                var t = (el.innerText || el.textContent || '').trim();
+                if (t && t.length < 200 && t.toLowerCase().indexOf(text.toLowerCase()) !== -1) {
+                  if (!best || t.length <= best[1].length) best = [el, t];
+                }
+              }
+              if (best) {
+                clickableAncestor(best[0]).click();
+                return text;
+              }
+            }
+            return null;
+          })()
+        `;
+
+        for (let i = 0; i < 10; i++) {
+          const clickedTarget = await evalJs(autoClickTargetsJs);
+          if (clickedTarget) {
+            addLog(`[CDP LOGIN] Automatycznie kliknięto: '${clickedTarget}'`);
+            if (clickedTarget === "Aplikacja mObywatel") {
+              addLog("[CDP LOGIN OK] Osiągnięto ekran z kodem QR mObywatel! Zeskanuj kod w aplikacji mObywatel.");
+              break;
+            }
+          }
+          await sleep(1500);
+        }
+      };
+
+    } catch (err) {
+      console.warn("Auto login CDP error", err);
     }
   }
 
